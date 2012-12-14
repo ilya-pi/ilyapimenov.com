@@ -1,0 +1,146 @@
+/*html, */
+html {
+    height: 100%
+}
+
+body {
+    /*padding-top: 1%;*/
+    height: 100%;
+    /*min-height: 98%;*/
+    /*background: #00feb6;*/
+
+    /*//00B380*/
+    /*background-image: -webkit-linear-gradient(bottom right, #00B380 0, #00feb6 100%);*/
+}
+
+* {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 400;
+    color: white;
+}
+
+a {
+    color: #00FEB6;
+}
+
+a:hover{
+    color: #00B380;
+}
+
+h1 {
+    /*font-size: 2em;*/
+    /*font-size: 50px;*/
+    color: #00feb6;
+    font-family: 'Open Sans Condensed', sans-serif;
+    font-weight: 700;
+    /*color: white;*/
+
+    /*blend*/
+    /*color: #00FEB6;*/
+    /*color: #00B380;*/
+    /*color: #00FF0D;*/
+    /*color: #00B309;*/
+    /*color: #000000;*/
+    color: #ffffff;
+}
+
+p {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 400;
+}
+
+#middleouttercontainer {
+    position: relative;
+    height: 100%;
+}
+
+#middleinnercontainer {
+    position: absolute;
+    top: 50%;
+    height: 350px;
+    width: 100%;
+    margin-top: -175px
+}
+
+.datablock{
+    padding: 5px 15px;
+    width: 80%;
+    text-align: left;
+}
+
+#main {
+    /*margin-left: 1%;*/
+    /*width: 98%;*/
+    height: 100%;
+    min-height: 100%;
+}
+
+.block,
+.block {
+    /*margin: -1px;*/
+    /*border: 1px dashed #999;*/
+    background: #000;
+    /*background: url('../img/maria-rutberg-photo-web.jpg');*/
+    background-image: -webkit-linear-gradient(bottom right, rgba(0, 0, 0, .7) 0, rgba(0, 0, 0, 0) 150%), -webkit-linear-gradient(-45deg, rgba(255, 238, 178, .15) 0%, rgba(255, 238, 178, 0) 25%, rgba(255, 238, 178, .15) 25%, rgba(255, 238, 178, 0) 50%, rgba(255, 238, 178, .15) 50%, rgba(255, 238, 178, 0) 75%, rgba(255, 238, 178, .15) 75%, rgba(255, 238, 178, 0) 100%);
+    background-image: -moz-linear-gradient(bottom right, rgba(0, 0, 0, .7) 0, rgba(0, 0, 0, 0) 150%), -moz-linear-gradient(-45deg, rgba(255, 238, 178, .15) 0%, rgba(255, 238, 178, 0) 25%, rgba(255, 238, 178, .15) 25%, rgba(255, 238, 178, 0) 50%, rgba(255, 238, 178, .15) 50%, rgba(255, 238, 178, 0) 75%, rgba(255, 238, 178, .15) 75%, rgba(255, 238, 178, 0) 100%);
+    background-image: linear-gradient(bottom right, rgba(0, 0, 0, .7) 0, rgba(0, 0, 0, 0) 150%), linear-gradient(-45deg, rgba(255, 238, 178, .15) 0%, rgba(255, 238, 178, 0) 25%, rgba(255, 238, 178, .15) 25%, rgba(255, 238, 178, 0) 50%, rgba(255, 238, 178, .15) 50%, rgba(255, 238, 178, 0) 75%, rgba(255, 238, 178, .15) 75%, rgba(255, 238, 178, 0) 100%);
+    /*background-size: 250px 250px, 100% 100%;*/
+    /*background-color: #26292d;*/
+    /*background-size: 250px 250px, 100% 100%;*/
+}
+
+#block100 {
+    /*width: 100%;*/
+    /*float: left;*/
+    /*clear: right;*/
+    text-align: center;
+    height: 100%;
+}
+
+#center-wrapper {
+}
+
+#center {
+
+}
+
+#t1{
+    padding: 25px 0 0 20px;
+}
+
+.qrtoggle{
+    cursor: pointer;
+}
+.qrtoggle:hover{
+    color: #00FF0D;
+}
+
+.border {
+  background: #ffffff;
+  position: fixed;
+  z-index: 5000;
+}
+.border.left,
+.border.right {
+  width: 20px;
+  height: 100%;
+  top: 0;
+}
+.border.left {
+  left: 0;
+}
+.border.right {
+  right: 0;
+}
+.border.top,
+.border.bottom {
+  height: 20px;
+  width: 100%;
+  left: 0;
+}
+.border.top {
+  top: 0;
+}
+.border.bottom {
+  bottom: 0;
+}
