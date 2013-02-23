@@ -21,6 +21,7 @@
 
     <link href="css/bootstrap.min.css" rel="stylesheet" media="screen">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/glyphicons.css">
 
 </head>
 <body>
@@ -43,6 +44,10 @@ chromium.org/developers/how-tos/chrome-frame-getting-started -->
             <div class="datablock">
                 <p><i class="icon-map-marker icon-white"></i>&nbsp;<strong>Amsterdam</strong> Netherlands</p>
 
+                <!-- <p><i class="w-glyphicon-facebook icon-white"></i>&nbsp;<a href="https://www.facebook.com/ilya.pimenov">facebook</a></p> -->
+                <p><i class="w-glyphicon-github icon-white"></i>&nbsp;<a href="https://github.com/ilya-pi">ilya-pi@github</a></p>                
+                <p><i class="w-glyphicon-linked-in icon-white"></i>&nbsp;<a href="http://www.linkedin.com/profile/view?id=18949155">CV@linked-in</a></p>
+
                 <p><span class="qrtoggle" onclick="$('.qrcode').toggle()"><i class=" icon-qrcode icon-white"></i>&nbsp;QR-Card</span> </p>
                 <img style="display: none;" class="qrcode" src="http://api.qrserver.com/v1/create-qr-code/?data=BEGIN%3AVCARD%0AVERSION%3A2.1%0AFN%3AIlya%20Pimenov%0AN%3APimenov%3BIlya%0ATITLE%3AMr.%0AEMAIL%3BHOME%3BINTERNET%3Ailya.pimenov%40gmail.com%0AURL%3Ahttp%3A%2F%2Filyapimenov.com%0AADR%3A%3B%3BHerengracht%2063-I%3BAmsterdam%3B%3B1015BC%3BNetherlands%0AORG%3AXaton%20BV%0AEND%3AVCARD%0A&#38;size=300x300&#38;prov=goqrme" alt="QR Code generator" title="" />
 
@@ -50,10 +55,12 @@ chromium.org/developers/how-tos/chrome-frame-getting-started -->
         </article>
         <article id="middleouttercontainer" class="span4">
             <div id="middleinnercontainer">
-                <img class="img-circle" alt="facebook userpicutre"
-                     src="http://graph.facebook.com/ilya.pimenov/picture?type=large"/>
+                <img class="img-circle" alt="facebook userpicutre" src="http://graph.facebook.com/ilya.pimenov/picture?type=large" onmouseover="$(this).css({'transform': 'rotate(15deg)', '-moz-transform': 'rotate(15deg)', '-webkit-transform': 'rotate(15deg)'});" onmouseout="$(this).css({'transform': 'rotate(0deg)', '-moz-transform': 'rotate(0deg)', '-webkit-transform': 'rotate(0deg)'});"/>
+                <!-- <img class="img-circle" alt="facebook userpicutre" src="img/picture.jpg" onmouseover="$(this).css({'transform': 'rotate(15deg)', '-moz-transform': 'rotate(15deg)', '-webkit-transform': 'rotate(15deg)'});" onmouseout="$(this).css({'transform': 'rotate(0deg)', '-moz-transform': 'rotate(0deg)', '-webkit-transform': 'rotate(0deg)'});"/> -->
 
                 <h1>Ilya Pimenov</h1>
+
+                <p>25 y/o engineer with extensive interested in big data, data visualization, deep app integration and SaaS solutions</p>
 
                 <p><a href="mailto:ilya.pimenov@gmail.com">e-mail</a></p>
             </div>
@@ -66,6 +73,7 @@ chromium.org/developers/how-tos/chrome-frame-getting-started -->
 
 <script src="http://code.jquery.com/jquery-latest.js"></script>
 <script src="js/bootstrap.min.js"></script>
+<script src="js/my.js"></script>
 
 <!-- JavaScript at the bottom for fast page loading -->
 
