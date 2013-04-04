@@ -49,6 +49,40 @@ p {
     font-weight: 400;
 }
 
+@-webkit-keyframes rotate {
+  from {
+    -webkit-transform: rotate(0deg);
+  }
+  to { 
+    -webkit-transform: rotate(360deg);
+  }
+}
+
+@-moz-keyframes rotate {
+  from {
+    -moz-transform: rotate(0deg);
+  }
+  to { 
+    -moz-transform: rotate(360deg);
+  }
+}
+
+@-ms-keyframes rotate {
+  from {
+    -ms-transform: rotate(0deg);
+  }
+  to { 
+    -ms-transform: rotate(360deg);
+  }
+}
+
+.vinyl
+{    
+     -webkit-animation: rotate 1.5s linear 0s infinite;
+     -moz-animation: rotate 1.5s linear 0s infinite;
+     -ms-animation: rotate 1.5s linear 0s infinite;     
+}
+
 #middleouttercontainer {
     position: relative;
     height: 100%;
