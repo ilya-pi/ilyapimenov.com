@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+ 
+ <title>The blog of Ilya Pimenov</title>
+ <link href="http://example.com/atom.xml" rel="self"/>
+ <link href="http://example.com"/>
+ <updated>2013-11-05T18:52:18+01:00</updated>
+ <id>http://example.com</id>
+ <author>
+   <name>Ilya Pimenov</name>
+   <email>ilya.pimenov@gmail.com</email>
+ </author>
+
+ 
+ <entry>
+   <title>HyperLogLog with Cascalog</title>
+   <link href="http://example.com/blog/2013/10/25/hyperloglog-with-cascalog.html"/>
+   <updated>2013-10-25T00:00:00+02:00</updated>
+   <id>http://example.com/blog/2013/10/25/hyperloglog-with-cascalog</id>
+   <content type="html">
+&lt;p&gt;We’ll look shortly in how you would utilize awesomeness of both Cascalog and HyperLogLog in order to execute Hadoop M/R tasks with amounts of data too big to have them in their original form.&lt;/p&gt;
+&lt;hr /&gt;
+&lt;h1 id=&quot;intro&quot;&gt;Intro&lt;/h1&gt;
+&lt;dl&gt;
+  &lt;dt&gt;&lt;strong&gt;HyperLogLog&lt;/strong&gt;&lt;/dt&gt;
+  &lt;dd&gt;Estimator alllowing you to count amount of distinct values of a certain object in environment.&lt;/dd&gt;
+  &lt;dt&gt;&lt;strong&gt;Cascalog&lt;/strong&gt;&lt;/dt&gt;
+  &lt;dd&gt;Framework taking the hassle away from you when developing anything on not offer&lt;/dd&gt;
+&lt;/dl&gt;
+&lt;h1 id=&quot;prerequisites&quot;&gt;Prerequisites&lt;/h1&gt;
+
+&lt;p&gt;I assume you are already familiar with &lt;a href=&quot;http://clojure.org/&quot;&gt;Clojure&lt;/a&gt;, &lt;a href=&quot;https://github.com/nathanmarz/cascalog&quot;&gt;Cascalog&lt;/a&gt; framework and &lt;a href=&quot;http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/&quot;&gt;HyperLogLog&lt;/a&gt; algorithm.&lt;/p&gt;
+
+&lt;h1 id=&quot;counting_passengers&quot;&gt;Counting Passengers&lt;/h1&gt;
+
+&lt;h2 id=&quot;task_as_stated&quot;&gt;Task as stated&lt;/h2&gt;
+
+&lt;p&gt;We, &lt;a href=&quot;http://screen6.io/&quot;&gt;Screen6&lt;/a&gt; are located in Amsterdam, and here, in Netherlands, you have this simple and easy system of public transport accessed by OV-Chipkaart and it works like this: prior to accessing the public transport (whether that be a tram, a bus or a train for that matter), you check-in by scanning your card, and once you got to your destination — you check-out.&lt;/p&gt;
+
+&lt;p&gt;It’s very handy and simple, I use all the time, whenver I’m neither biking, nor walking.&lt;/p&gt;
+
+&lt;p&gt;Now imagine you have all the populous cities and people going threw them on a daily/weekly/monthly/yearly basis, how would you monitor that traffic?&lt;/p&gt;
+
+&lt;p&gt;Say, you want to see distribution of passengers in a certain city district (identified by zipcode) over the time; and then you’d love to see that same distribution over a month for two district? three districts? Two cities?&lt;/p&gt;
+
+&lt;p&gt;You cannot just store the list of unique passengers in all the districts per each smallest time-unit — it will be simply way too big to process and access for further analytics; and you cannot just store count of unique passengers, as that information is useless once you come to merging traffic in the different districts and cities (certainly those sets intersect heavily — it is very common to live in Den Haag and work either in Amsterdam, Amsterdam Sloterdijk or Schiphol).&lt;/p&gt;
+
+&lt;p&gt;That is where &lt;em&gt;“estimators”&lt;/em&gt; approach comes in handy. It doesn’t provide you with exact number, but rathers says what is the cardinality of a certain set with a desired probability, yet being comparative;y dense to the initial set of original items and allowing to merge different register sets; a certain number of algorithms has popped out lately one of them being &lt;strong&gt;HyperLogLog&lt;/strong&gt;, and that is exactly the one we’ll take our Cascalog-ride with.&lt;/p&gt;
+
+&lt;h2 id=&quot;formatting_and_sample_dataset&quot;&gt;Formatting and sample dataset&lt;/h2&gt;
+
+&lt;p&gt;So, we assuming that we’ll have OV-chipkaartjes access-logs; whenver you’ve swiped it — we have a record of &lt;code&gt;city&lt;/code&gt;, &lt;code&gt;district&lt;/code&gt;, &lt;code&gt;tag&lt;/code&gt; and &lt;code&gt;timestamp&lt;/code&gt;:&lt;/p&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;field&lt;/th&gt;&lt;th&gt;type&lt;/th&gt;&lt;th&gt;example&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;code&gt;city&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Varchar&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Amsterdam&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;code&gt;district&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Zipcode&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;1015&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;code&gt;tag&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;UUID&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;96e4bfec-8cf5-4af1-9469-b7f0dc36dc29&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;code&gt;timestamp&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Ms. from Epoch&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;1363026503&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;&lt;/table&gt;
+&lt;p&gt;To obtain a sample file, we’ll throw some clojure code into the REPL:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;cities&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='s'&gt;&amp;quot;Amsterdam&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Groningen&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Haarlem&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Den Haag&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Utrecht&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Delft&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;Edam&amp;quot;&lt;/span&gt; &lt;span class='p'&gt;])&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;tags&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;take &lt;/span&gt;&lt;span class='mi'&gt;10000&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;repeatedly&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;str &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;java.util.UUID/randomUUID&lt;/span&gt;&lt;span class='p'&gt;)))))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;line&lt;/span&gt; &lt;span class='p'&gt;[]&lt;/span&gt;
+	&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt; &lt;span class='nv'&gt;city&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;nth &lt;/span&gt;&lt;span class='nv'&gt;cities&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;rand-int &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.size&lt;/span&gt; &lt;span class='nv'&gt;cities&lt;/span&gt;&lt;span class='p'&gt;)))&lt;/span&gt;
+			&lt;span class='nv'&gt;district&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;+ &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;+ &lt;/span&gt;&lt;span class='mi'&gt;10&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;rand-int &lt;/span&gt;&lt;span class='mi'&gt;89&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;* &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;+ &lt;/span&gt;&lt;span class='mi'&gt;10&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;rand-int &lt;/span&gt;&lt;span class='mi'&gt;89&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt; &lt;span class='mi'&gt;100&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+			&lt;span class='nv'&gt;tag&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;nth &lt;/span&gt;&lt;span class='nv'&gt;tags&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;rand-int &lt;/span&gt;&lt;span class='mi'&gt;10000&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+			&lt;span class='nv'&gt;timestamp&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;+ &lt;/span&gt;&lt;span class='mi'&gt;1351680873&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;rand-int &lt;/span&gt;&lt;span class='mi'&gt;31536001&lt;/span&gt;&lt;span class='p'&gt;))]&lt;/span&gt;
+		&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;str &lt;/span&gt;&lt;span class='nv'&gt;city&lt;/span&gt; &lt;span class='s'&gt;&amp;quot; &amp;quot;&lt;/span&gt; &lt;span class='nv'&gt;district&lt;/span&gt; &lt;span class='s'&gt;&amp;quot; &amp;quot;&lt;/span&gt; &lt;span class='nv'&gt;tag&lt;/span&gt; &lt;span class='s'&gt;&amp;quot; &amp;quot;&lt;/span&gt; &lt;span class='nv'&gt;timestamp&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;\n&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+	&lt;span class='p'&gt;))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;use&lt;/span&gt; &lt;span class='ss'&gt;&amp;#39;clojure.java.io&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;with-open &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;wrtr&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;writer&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;./ov-chipkaart-accesslogs.txt&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+	&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;dotimes &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;n&lt;/span&gt; &lt;span class='mi'&gt;5000000&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.write&lt;/span&gt; &lt;span class='nv'&gt;wrtr&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;line&lt;/span&gt;&lt;span class='p'&gt;))))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&quot;defining_incoming_datasets&quot;&gt;Defining incoming datasets&lt;/h2&gt;
+
+&lt;p&gt;Normally you would define one &lt;code&gt;source&lt;/code&gt; function per dataset type as a simple cascalog query, that does reading, mapping, type checks and conversions. In out example it would be rather simple, we’ll simply read the file line-by-line from Hadoop File System:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;ov-fields&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='s'&gt;&amp;quot;?city&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;?district&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;?uuid&amp;quot;&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;?timestamp&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;ov-source&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;&amp;quot;&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;directory&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;source&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;get-tap&lt;/span&gt; &lt;span class='nv'&gt;directory&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/&amp;lt;-&lt;/span&gt; &lt;span class='nv'&gt;ov-fields&lt;/span&gt;
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;source&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;ov-fields&lt;/span&gt;&lt;span class='p'&gt;))))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Now we have an &lt;code&gt;ov-source&lt;/code&gt; cascalog query, which we can utilize as an incoming data stream; without caring to much if the data is correct or not&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;HINT&lt;/strong&gt; add filters to the ov-souce query, in order to drop undesired corrupted data.&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&quot;which_one&quot;&gt;Which one?&lt;/h2&gt;
+
+&lt;p&gt;From all those lib&lt;/p&gt;
+
+&lt;p&gt;https://github.com/addthis/stream-lib&lt;/p&gt;
+
+&lt;h2 id=&quot;creating_offers&quot;&gt;Creating offers&lt;/h2&gt;
+
+&lt;p&gt;Depending on the case, you might even want to construct an &lt;em&gt;offer&lt;/em&gt; string for you hyperloglog value. Yet, keep in mind — it is way better and much more efficient to keep the offers and merge those into the existing hyperloglog value, rahter then merging multiple hyperloglog values.&lt;/p&gt;
+
+&lt;p&gt;Lets drop a little code sketch real quick to compare them (though it won’t be entirely fair, can you tell why?):&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='c1'&gt;;;&lt;/span&gt;
+&lt;span class='c1'&gt;;; single hyperloglog value, multiple inserts&lt;/span&gt;
+&lt;span class='c1'&gt;;;&lt;/span&gt;
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;time &lt;/span&gt;
+	&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;dotimes &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;n&lt;/span&gt; &lt;span class='mi'&gt;1000000&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; 
+		&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;h&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;str &lt;/span&gt;&lt;span class='s'&gt;&amp;quot;check&amp;quot;&lt;/span&gt; &lt;span class='nv'&gt;n&lt;/span&gt;&lt;span class='p'&gt;))))&lt;/span&gt;
+
+&lt;span class='c1'&gt;;;&lt;/span&gt;
+&lt;span class='c1'&gt;;; and this is like if we are merging hyperloglogs all the time; &lt;/span&gt;
+&lt;span class='c1'&gt;;; note that we have to create hyperloglog value every time&lt;/span&gt;
+&lt;span class='c1'&gt;;;&lt;/span&gt;
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;time &lt;/span&gt;
+	&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;dotimes &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;n&lt;/span&gt; &lt;span class='mi'&gt;1000000&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; 
+		&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='nv'&gt;h&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;nh&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+			&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;nh&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;str &lt;/span&gt;&lt;span class='s'&gt;&amp;quot;check&amp;quot;&lt;/span&gt; &lt;span class='nv'&gt;n&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+			&lt;span class='nv'&gt;nh&lt;/span&gt;&lt;span class='p'&gt;))))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Here is a sample time comparison &lt;code&gt;offer&lt;/code&gt; vs &lt;code&gt;merge&lt;/code&gt; result:&lt;/p&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;operation&lt;/th&gt;&lt;th&gt;execution 1&lt;/th&gt;&lt;th&gt;execution 2&lt;/th&gt;&lt;th&gt;execution 3&lt;/th&gt;&lt;th&gt;execution 4&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td style=&quot;text-align: center;&quot;&gt;&lt;code&gt;offer&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1513.87 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1479.377 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1493.119 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1485.23 msecs&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: center;&quot;&gt;&lt;code&gt;merge&lt;/code&gt;&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;7433.302 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;7306.165 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;7369.459 msecs&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;7246.366 msecs&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;&lt;/table&gt;
+&lt;p&gt;Most of the time, you would have a &lt;code&gt;source&lt;/code&gt; cascalog query to provide normalized incoming input, and our case wont be any &lt;strong&gt;different&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h2 id=&quot;reducing&quot;&gt;Reducing&lt;/h2&gt;
+
+&lt;p&gt;Now, once we have read files, reducing in Cascalog is rather easy and straighforward, yet we will throw in some code in order to deal with hyperloglog values in an easy way:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmulti &lt;/span&gt;&lt;span class='nv'&gt;merge&lt;/span&gt;
+          &lt;span class='s'&gt;&amp;quot;Merge two HyperLogLog objects.&lt;/span&gt;
+
+&lt;span class='s'&gt;           If one of values is an offer, then it will be offered to the HyperLogLog&lt;/span&gt;
+&lt;span class='s'&gt;           value.  If both values are offers, new HyperLogLog will be created and both&lt;/span&gt;
+&lt;span class='s'&gt;           values will be offered to this newly created value.&amp;quot;&lt;/span&gt;
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;fn &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[(&lt;/span&gt;&lt;span class='nb'&gt;class &lt;/span&gt;&lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;class &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)]))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.addAll&lt;/span&gt; &lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;String&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;String&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nb'&gt;right &lt;/span&gt;&lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;nil&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;nil&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;String&lt;/span&gt; &lt;span class='nv'&gt;String&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='nv'&gt;acc&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;As you can see, this will merge whatever you feed it, and provide you with the hyperloglog value.&lt;/p&gt;
+
+&lt;p&gt;Now we throw some cascalog glue in:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;merge-n&lt;/span&gt;
+  &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;h1&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+  &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt; &lt;span class='o'&gt;&amp;amp;&lt;/span&gt; &lt;span class='nv'&gt;more&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+   &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;reduce merge &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='nv'&gt;more&lt;/span&gt;&lt;span class='p'&gt;)))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;identity&lt;/span&gt;
+  &lt;span class='p'&gt;{&lt;/span&gt;&lt;span class='ss'&gt;:static&lt;/span&gt; &lt;span class='nv'&gt;true&lt;/span&gt;&lt;span class='p'&gt;}&lt;/span&gt;
+  &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;value&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;res&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;res&lt;/span&gt; &lt;span class='nv'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='nv'&gt;res&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/defparallelagg&lt;/span&gt; &lt;span class='nv'&gt;parallel-sum&lt;/span&gt;
+                  &lt;span class='ss'&gt;:init-var&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='ss'&gt;&amp;#39;identity&lt;/span&gt;
+                  &lt;span class='ss'&gt;:combine-var&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='ss'&gt;&amp;#39;merge-n&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;sum&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ops/each&lt;/span&gt; &lt;span class='nv'&gt;parallel-sum&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;This operations will &lt;em&gt;“summ up”&lt;/em&gt; all the offers, the same way you would’ve use &lt;code&gt;cascalog.ops/sum&lt;/code&gt; operation on numerical values. In a cascalog query it will end simply up as:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/&amp;lt;-&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;?city&lt;/span&gt; &lt;span class='nv'&gt;?district&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+      &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ov-source&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;ov-fields&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+      &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hll/sum&lt;/span&gt; &lt;span class='nv'&gt;?uuid&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;blockquote&gt;
+&lt;p&gt;todo: ilya — stress out that we are not mergin HLL’s among each other&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&quot;persisting&quot;&gt;Persisting&lt;/h2&gt;
+
+&lt;p&gt;HyperLogLog is an object, basically a set or register set’s under the hood, and might you want to persist it — you will require to serialize it somehow.&lt;/p&gt;
+
+&lt;p&gt;Now in order to use some sort of JDBC Tap, you’ll need to store your bytes sequence, which Cascalog is in a form of string of some kind; without diving too deep, we simply encode it with &lt;code&gt;base64&lt;/code&gt; and throw it is as an UTF-8 string; so the whole cascalog query will look like this:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/defmapop&lt;/span&gt; &lt;span class='nv'&gt;stringify&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;hll-object&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+    &lt;span class='p'&gt;[(&lt;/span&gt;&lt;span class='nf'&gt;Base64/encodeBase64String&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.getBytes&lt;/span&gt; &lt;span class='nv'&gt;hll-object&lt;/span&gt;&lt;span class='p'&gt;))])&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;get-day-n-year&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;epoch-time&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt; &lt;span class='nv'&gt;epoch-time-long&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;Long/parseLong&lt;/span&gt; &lt;span class='nv'&gt;epoch-time&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+         &lt;span class='nv'&gt;in-millis&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;* &lt;/span&gt;&lt;span class='nv'&gt;epoch-time-long&lt;/span&gt; &lt;span class='mi'&gt;1000&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='nv'&gt;date&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;time2/from-long&lt;/span&gt; &lt;span class='nv'&gt;in-millis&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+    &lt;span class='p'&gt;[(&lt;/span&gt;&lt;span class='nf'&gt;.getDayOfYear&lt;/span&gt; &lt;span class='nv'&gt;date&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.getYear&lt;/span&gt; &lt;span class='nv'&gt;date&lt;/span&gt;&lt;span class='p'&gt;)]))&lt;/span&gt;
+
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;count-gvb-passengers&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;path&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;ov-source&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ov-source&lt;/span&gt; &lt;span class='nv'&gt;path&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/&amp;lt;-&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;?city&lt;/span&gt; &lt;span class='nv'&gt;?district&lt;/span&gt; &lt;span class='nv'&gt;?day&lt;/span&gt; &lt;span class='nv'&gt;?year&lt;/span&gt; &lt;span class='nv'&gt;?cardinality&lt;/span&gt; &lt;span class='nv'&gt;?base64-hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='ss'&gt;:trap&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/hfs-textline&lt;/span&gt; &lt;span class='s'&gt;&amp;quot;/tmp/hll-demo-errors&amp;quot;&lt;/span&gt; &lt;span class='ss'&gt;:sinkmode&lt;/span&gt; &lt;span class='ss'&gt;:replace&lt;/span&gt; &lt;span class='p'&gt;))&lt;/span&gt;
+
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ov-source&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;ov-fields&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hll/sum&lt;/span&gt; &lt;span class='nv'&gt;?uuid&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;cardinality&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;?cardinality&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;get-day-n-year&lt;/span&gt; &lt;span class='nv'&gt;?timestamp&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;?day&lt;/span&gt; &lt;span class='nv'&gt;?year&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+          &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hll/stringify&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt; &lt;span class='ss'&gt;:&amp;gt;&lt;/span&gt; &lt;span class='nv'&gt;?base64-hll&lt;/span&gt;&lt;span class='p'&gt;))))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Note that we through in day and year parsing. Now we have nice rows district-day with the amount of passengers see on that day, which can be cheaply merged in the runtime (whenever you request statistics through any online tooling). Sweeet.&lt;/p&gt;
+
+&lt;h3 id=&quot;how_much_would_it_take&quot;&gt;How much would it take?&lt;/h3&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;todo: ilya — cover up how much would memmory and why would it take to persist current hyperloglog fields in postgress with base64 utf8 encoding&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h1 id=&quot;gist&quot;&gt;Gist&lt;/h1&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;todo: ilya — provide nicelt looking gist for this code&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h1 id=&quot;links&quot;&gt;Links&lt;/h1&gt;
+
+&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;http://clojure.org/&quot;&gt;Clojure: Dynamic programming language that target Java Virtual Machine&lt;/a&gt;&lt;/li&gt;
+
+&lt;li&gt;&lt;a href=&quot;http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/&quot;&gt;HyperLogLog — Cornerstone of a Big Data Infrastructure&lt;/a&gt;&lt;/li&gt;
+
+&lt;li&gt;&lt;a href=&quot;https://github.com/nathanmarz/cascalog&quot;&gt;Cascalog: Data processing on Hadoop without the hassle&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+</content>
+ </entry>
+ 
+ 
+</feed>
