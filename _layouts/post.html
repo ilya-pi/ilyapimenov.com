@@ -15,6 +15,12 @@ layout: default
   {{ content }}
 </div>
 
+{% if page.author %}
+<div id="author">
+  by {{ page.author }}
+</div>
+{% endif %}
+
 {% if page.comments %}
     <div id="disqus_thread"></div>
     <script type="text/javascript">

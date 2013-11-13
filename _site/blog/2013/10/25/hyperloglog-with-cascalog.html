@@ -77,120 +77,139 @@
 
 <div id="post">
   
-<p>We’ll look shortly in how you would utilize awesomeness of both Cascalog and HyperLogLog in order to execute Hadoop M/R tasks with amounts of data too big to have them in their original form.</p>
+<p>We’ll look briefly in how you would utilize awesomeness of both Cascalog and HyperLogLog in order to execute Hadoop M/R tasks with amounts of data too big to have them in their original form.</p>
 <hr />
 <h1 id="intro">Intro</h1>
 <dl>
   <dt><strong>HyperLogLog</strong></dt>
-  <dd>Estimator alllowing you to count amount of distinct values of a certain object in environment.</dd>
+  <dd>Cardinality estimator allowing you to count amount of distinct values.</dd>
   <dt><strong>Cascalog</strong></dt>
-  <dd>Framework taking the hassle away from you when developing anything on not offer</dd>
+  <dd>The main use cases for Cascalog are processing "Big Data" on top of Hadoop or doing analysis on your local computer. Cascalog is a replacement for tool like Pig, Hive, and Cascading which operates at a significantly higher level of abstraction than those tools.</dd>
 </dl>
 <h1 id="prerequisites">Prerequisites</h1>
 
-<p>I assume you are already familiar with <a href="http://clojure.org/">Clojure</a>, <a href="https://github.com/nathanmarz/cascalog">Cascalog</a> framework and <a href="http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/">HyperLogLog</a> algorithm.</p>
+<p>We’ll assume you are already familiar with the <a href="http://clojure.org/">Clojure</a>, <a href="https://github.com/nathanmarz/cascalog">Cascalog</a> framework and <a href="http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/">HyperLogLog</a> algorithm. Otherwise — jump straight to the bottom for some links, there are some nice reads there.</p>
 
 <h1 id="counting_passengers">Counting Passengers</h1>
 
 <h2 id="task_as_stated">Task as stated</h2>
 
-<p>We, <a href="http://screen6.io/">Screen6</a> are located in Amsterdam, and here, in Netherlands, you have this simple and easy system of public transport accessed by OV-Chipkaart and it works like this: prior to accessing the public transport (whether that be a tram, a bus or a train for that matter), you check-in by scanning your card, and once you got to your destination — you check-out.</p>
+<p>We’ll deal with an example that is similar in its mechanics with a task we face ourselves at <a href="http://screen6.io/">Screen6</a>, yet being from another market — passenger transportation.</p>
 
-<p>It’s very handy and simple, I use all the time, whenver I’m neither biking, nor walking.</p>
+<p>We are located in Amsterdam, and here, in Netherlands, you have this simple and easy system of public transport accessed by NFC card and which works as follows: prior to accessing the public transport (whether that be a tram, a bus or a train for that matter), you check-in by scanning your card, and once you get to your destination — you check-out with that same NFC card (which is called “OV-Chipkaart”).</p>
 
-<p>Now imagine you have all the populous cities and people going threw them on a daily/weekly/monthly/yearly basis, how would you monitor that traffic?</p>
+<p>It’s convenient, I use all the time, whenever I’m neither biking or walking.</p>
 
-<p>Say, you want to see distribution of passengers in a certain city district (identified by zipcode) over the time; and then you’d love to see that same distribution over a month for two district? three districts? Two cities?</p>
+<p>Now imagine you have all these populous cities and people commuting between them on a daily/weekly/monthly/yearly basis, how would you monitor that traffic?</p>
 
-<p>You cannot just store the list of unique passengers in all the districts per each smallest time-unit — it will be simply way too big to process and access for further analytics; and you cannot just store count of unique passengers, as that information is useless once you come to merging traffic in the different districts and cities (certainly those sets intersect heavily — it is very common to live in Den Haag and work either in Amsterdam, Amsterdam Sloterdijk or Schiphol).</p>
+<p>Say, you want to see distribution of passengers in a certain city district (identified by zipcode) over time, and on top of that you’d love to see that same distribution over a month for two districts? Or three districts? Or two cities altogether?</p>
 
-<p>That is where <em>“estimators”</em> approach comes in handy. It doesn’t provide you with exact number, but rathers says what is the cardinality of a certain set with a desired probability, yet being comparative;y dense to the initial set of original items and allowing to merge different register sets; a certain number of algorithms has popped out lately one of them being <strong>HyperLogLog</strong>, and that is exactly the one we’ll take our Cascalog-ride with.</p>
+<p>You can just store all events without any aggregations and directly do queries on that dataset, but it possesses two issues within itself: perfomance concern, as we are dealing with what supposed to be a very big amount of data, and hence — persistence issues.</p>
+
+<p>You cannot just store the list of unique passengers in all the districts per each smallest time-unit — it will be simply way too big to process and access for further analytics; and you cannot just store count of unique passengers, as that information is useless once you come to merging traffic in the different districts and cities (certainly those sets intersect heavily — it is very common to live in The Hague and work either in Amsterdam, Amsterdam Sloterdijk or Schiphol).</p>
+
+<p>That is where a <em>caridnality estimator</em> comes in handy. It doesn’t provide you with an exact number, but rather tells you what the cardinality of a certain set is with a desired error margin, yet being comparatively dense to the initial set of original items and allowing you to merge different sets.</p>
+
+<p>A certain number of algorithms has popped out lately one of them being <strong>HyperLogLog</strong>, and that is the one we are taking with us on our Cascalog-ride.</p>
 
 <h2 id="formatting_and_sample_dataset">Formatting and sample dataset</h2>
 
-<p>So, we assuming that we’ll have OV-chipkaartjes access-logs; whenver you’ve swiped it — we have a record of <code>city</code>, <code>district</code>, <code>tag</code> and <code>timestamp</code>:</p>
+<p>We are assuming that we have OV-Chipkaart access-logs: each and every swipe (Log file line) gives you a record of <code>city</code>, <code>district</code>, <code>tag</code> and <code>timestamp</code>:</p>
 <table><thead><tr><th>field</th><th>type</th><th>example</th></tr></thead><tbody><tr><td style="text-align: left;"><code>city</code></td><td style="text-align: left;">Varchar</td><td style="text-align: left;">Amsterdam</td></tr>
 <tr><td style="text-align: left;"><code>district</code></td><td style="text-align: left;">Zipcode</td><td style="text-align: left;">1015</td></tr>
 <tr><td style="text-align: left;"><code>tag</code></td><td style="text-align: left;">UUID</td><td style="text-align: left;">96e4bfec-8cf5-4af1-9469-b7f0dc36dc29</td></tr>
 <tr><td style="text-align: left;"><code>timestamp</code></td><td style="text-align: left;">Ms. from Epoch</td><td style="text-align: left;">1363026503</td></tr>
-</tbody></table>
-<p>To obtain a sample file, we’ll throw some clojure code into the REPL:</p>
-<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='k'>def </span><span class='nv'>cities</span> <span class='p'>[</span><span class='s'>&quot;Amsterdam&quot;</span> <span class='s'>&quot;Groningen&quot;</span> <span class='s'>&quot;Haarlem&quot;</span> <span class='s'>&quot;Den Haag&quot;</span> <span class='s'>&quot;Utrecht&quot;</span> <span class='s'>&quot;Delft&quot;</span> <span class='s'>&quot;Edam&quot;</span> <span class='p'>])</span>
+</tbody></table><p style='text-align: center;'>Table 1. OV-Chipkaart access log record format</p>
+<p>Now, we didn’t get any logs from OV-Chipkaarts proprietor (though, I would’ve been delighted to get my hands on them), so we will have to generate some randomized data them ourselves. Here is the clojure code snippet code that will do just that:</p>
+<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='k'>def </span><span class='nv'>cities</span> <span class='p'>[</span><span class='s'>&quot;Amsterdam&quot;</span> <span class='s'>&quot;Groningen&quot;</span> <span class='s'>&quot;Haarlem&quot;</span>
+  <span class='s'>&quot;Den-Haag&quot;</span> <span class='s'>&quot;Utrecht&quot;</span> <span class='s'>&quot;Delft&quot;</span> <span class='s'>&quot;Edam&quot;</span> <span class='p'>])</span>
 
-<span class='p'>(</span><span class='k'>def </span><span class='nv'>tags</span> <span class='p'>(</span><span class='nb'>take </span><span class='mi'>10000</span> <span class='p'>(</span><span class='nf'>repeatedly</span> <span class='o'>#</span><span class='p'>(</span><span class='nb'>str </span><span class='p'>(</span><span class='nf'>java.util.UUID/randomUUID</span><span class='p'>)))))</span>
+<span class='p'>(</span><span class='k'>def </span><span class='nv'>tags</span> <span class='p'>(</span><span class='nf'>repeatedly</span> <span class='mi'>10000</span> <span class='o'>#</span><span class='p'>(</span><span class='nb'>str </span><span class='p'>(</span><span class='nf'>java.util.UUID/randomUUID</span><span class='p'>))))</span>
 
 <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>line</span> <span class='p'>[]</span>
-	<span class='p'>(</span><span class='k'>let </span><span class='p'>[</span> <span class='nv'>city</span> <span class='p'>(</span><span class='nb'>nth </span><span class='nv'>cities</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='p'>(</span><span class='nf'>.size</span> <span class='nv'>cities</span><span class='p'>)))</span>
-			<span class='nv'>district</span> <span class='p'>(</span><span class='nb'>+ </span><span class='p'>(</span><span class='nb'>+ </span><span class='mi'>10</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>89</span><span class='p'>))</span> <span class='p'>(</span><span class='nb'>* </span><span class='p'>(</span><span class='nb'>+ </span><span class='mi'>10</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>89</span><span class='p'>))</span> <span class='mi'>100</span><span class='p'>))</span>
-			<span class='nv'>tag</span> <span class='p'>(</span><span class='nb'>nth </span><span class='nv'>tags</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>10000</span><span class='p'>))</span>
-			<span class='nv'>timestamp</span> <span class='p'>(</span><span class='nb'>+ </span><span class='mi'>1351680873</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>31536001</span><span class='p'>))]</span>
-		<span class='p'>(</span><span class='nb'>str </span><span class='nv'>city</span> <span class='s'>&quot; &quot;</span> <span class='nv'>district</span> <span class='s'>&quot; &quot;</span> <span class='nv'>tag</span> <span class='s'>&quot; &quot;</span> <span class='nv'>timestamp</span> <span class='s'>&quot;\n&quot;</span><span class='p'>)</span>
-	<span class='p'>))</span>
+  <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>city</span> <span class='p'>(</span><span class='nf'>rand-nth</span> <span class='nv'>cities</span><span class='p'>)</span>
+        <span class='nv'>district</span> <span class='p'>(</span><span class='nb'>+ </span><span class='p'>(</span><span class='nb'>+ </span><span class='mi'>10</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>89</span><span class='p'>))</span> <span class='p'>(</span><span class='nb'>* </span><span class='p'>(</span><span class='nb'>+ </span><span class='mi'>10</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>89</span><span class='p'>))</span> <span class='mi'>100</span><span class='p'>))</span>
+        <span class='nv'>tag</span> <span class='p'>(</span><span class='nf'>rand-nth</span> <span class='nv'>tags</span><span class='p'>)</span>
+        <span class='nv'>timestamp</span> <span class='p'>(</span><span class='nb'>+ </span><span class='mi'>1351680873</span> <span class='p'>(</span><span class='nb'>rand-int </span><span class='mi'>31536001</span><span class='p'>))]</span>
+        <span class='p'>(</span><span class='nb'>str </span><span class='nv'>city</span> <span class='s'>&quot; &quot;</span> <span class='nv'>district</span> <span class='s'>&quot; &quot;</span> <span class='nv'>tag</span> <span class='s'>&quot; &quot;</span> <span class='nv'>timestamp</span> <span class='s'>&quot;\n&quot;</span><span class='p'>)))</span>
 
 <span class='p'>(</span><span class='nf'>use</span> <span class='ss'>&#39;clojure.java.io</span><span class='p'>)</span>
 <span class='p'>(</span><span class='nb'>with-open </span><span class='p'>[</span><span class='nv'>wrtr</span> <span class='p'>(</span><span class='nf'>writer</span> <span class='s'>&quot;./ov-chipkaart-accesslogs.txt&quot;</span><span class='p'>)]</span>
-	<span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>n</span> <span class='mi'>5000000</span><span class='p'>]</span> <span class='p'>(</span><span class='nf'>.write</span> <span class='nv'>wrtr</span> <span class='p'>(</span><span class='nf'>line</span><span class='p'>))))</span>
+  <span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>_</span> <span class='mi'>5000000</span><span class='p'>]</span> <span class='p'>(</span><span class='nf'>.write</span> <span class='nv'>wrtr</span> <span class='p'>(</span><span class='nf'>line</span><span class='p'>))))</span>
 </code></pre></div>
+<p>This would provide us with a file of approximate 157Mb size holding 5.000.000 OV-chipkaart accesslog records; gziped — 78Mb.</p>
+
 <h2 id="defining_incoming_datasets">Defining incoming datasets</h2>
 
-<p>Normally you would define one <code>source</code> function per dataset type as a simple cascalog query, that does reading, mapping, type checks and conversions. In out example it would be rather simple, we’ll simply read the file line-by-line from Hadoop File System:</p>
-<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='k'>def </span><span class='nv'>ov-fields</span> <span class='p'>[</span><span class='s'>&quot;?city&quot;</span> <span class='s'>&quot;?district&quot;</span> <span class='s'>&quot;?uuid&quot;</span> <span class='s'>&quot;?timestamp&quot;</span><span class='p'>])</span>
+<p>Normally you would define one <code>source</code> function per dataset type as a simple cascalog query, that does reading, mapping, type checks and conversions. Our example won’t be any different — we’ll read the file line-by-line from Hadoop File System (which will nicely pickup both gzippped and not gzipped files for us):</p>
+<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='kd'>ns </span><span class='nv'>...</span>
+  <span class='p'>(</span><span class='ss'>:require</span> <span class='nv'>...</span>
+            <span class='p'>[</span><span class='nv'>cascalog.api</span> <span class='ss'>:as</span> <span class='nv'>c</span><span class='p'>]</span>
+            <span class='p'>[</span><span class='nv'>cascalog.ops</span> <span class='ss'>:as</span> <span class='nv'>ops</span><span class='p'>]))</span>
+
+<span class='p'>(</span><span class='k'>def </span><span class='nv'>ov-fields</span> <span class='p'>[</span><span class='s'>&quot;?city&quot;</span> <span class='s'>&quot;?district&quot;</span> <span class='s'>&quot;?uuid&quot;</span> <span class='s'>&quot;?timestamp&quot;</span><span class='p'>])</span>
 
 <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>ov-source</span> <span class='s'>&quot;&quot;</span> <span class='p'>[</span><span class='nv'>directory</span><span class='p'>]</span>
   <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>source</span> <span class='p'>(</span><span class='nf'>get-tap</span> <span class='nv'>directory</span><span class='p'>)]</span>
     <span class='p'>(</span><span class='nf'>c/&lt;-</span> <span class='nv'>ov-fields</span>
           <span class='p'>(</span><span class='nf'>source</span> <span class='ss'>:&gt;&gt;</span> <span class='nv'>ov-fields</span><span class='p'>))))</span>
 </code></pre></div>
-<p>Now we have an <code>ov-source</code> cascalog query, which we can utilize as an incoming data stream; without caring to much if the data is correct or not</p>
-
-<blockquote>
-<p><strong>HINT</strong> add filters to the ov-souce query, in order to drop undesired corrupted data.</p>
-</blockquote>
-
+<p>Now we have an <code>ov-source</code> cascalog query, which can be utilized as an incoming data stream; without caring too much if the data is correct or not.</p>
+<div class='note'>Add filters to the ov-source query, in order to drop undesired corrupted data.</div>
 <h2 id="which_one">Which one?</h2>
 
-<p>From all those lib</p>
-
-<p>https://github.com/addthis/stream-lib</p>
+<p>Now, you can either go and implement your own implementation of HyperLogLog that will suit your needs, or you can pick one of the following already existing opensourced implementatoins:</p>
+<table><thead><tr><th>Company</th><th>Library</th><th>Link</th><th>Language</th><th>License</th></tr></thead><tbody><tr><td style="text-align: left;">Facebook</td><td style="text-align: left;"><a href="https://github.com/facebook/jcommon/">JCommon</a></td><td style="text-align: left;"><a href="https://github.com/facebook/jcommon/blob/master/stats/src/main/java/com/facebook/stats/cardinality/HyperLogLog.java">HyperLogLog.java</a></td><td style="text-align: left;">Java</td><td style="text-align: left;">Apache License 2.0</td></tr>
+<tr><td style="text-align: left;">Twitter</td><td style="text-align: left;"><a href="https://github.com/twitter/algebird/">Algebird</a></td><td style="text-align: left;"><a href="https://github.com/twitter/algebird/blob/develop/algebird-core/src/main/scala/com/twitter/algebird/HyperLogLog.scala">HyperLogLog.scala</a></td><td style="text-align: left;">Scala</td><td style="text-align: left;">Apache License 2.0</td></tr>
+<tr><td style="text-align: left;">AddThis</td><td style="text-align: left;"><a href="https://github.com/addthis/stream-lib">Stream-Lib</a></td><td style="text-align: left;"><a href="https://github.com/addthis/stream-lib/blob/master/src/main/java/com/clearspring/analytics/stream/cardinality/HyperLogLog.java">HyperLogLog.java</a></td><td style="text-align: left;">Java</td><td style="text-align: left;">Apache License 2.0</td></tr>
+<tr><td style="text-align: left;">indie!</td><td style="text-align: left;"><a href="https://gist.github.com/yukim">yukim’s gists</a></td><td style="text-align: left;"><a href="https://gist.github.com/yukim/2597943#file-hyperloglog-java">HyperLogLog.java</a></td><td style="text-align: left;">Java</td><td style="text-align: left;">Apache License 2.0</td></tr>
+</tbody></table><p style='text-align: center;'>Table 2. Available HyperLogLog implementations</p>
+<p>We chose <a href="http://www.addthis.com/">AddThis</a>’s <a href="https://github.com/addthis/stream-lib">Stream-Lib</a>’s implementation, as from my subjective point of view it seemed to be most clear, nicely documented and reasonable implementatable; besides, they added a bunch of other sweet things for cardinality estimation in that same library, together with the list of papers their implementations were based upon.</p>
 
 <h2 id="creating_offers">Creating offers</h2>
 
-<p>Depending on the case, you might even want to construct an <em>offer</em> string for you hyperloglog value. Yet, keep in mind — it is way better and much more efficient to keep the offers and merge those into the existing hyperloglog value, rahter then merging multiple hyperloglog values.</p>
+<p>There are two approaches to merging HyperLogLog values:</p>
 
-<p>Lets drop a little code sketch real quick to compare them (though it won’t be entirely fair, can you tell why?):</p>
-<div class='highlight'><pre><code class='clojure'><span class='c1'>;;</span>
+<ol>
+<li>Either you create an object wrapping up each value in a HyperLogLog value and merge those after</li>
+
+<li>Or you create HyperLogLog value once for a set of values and then <em>offer</em> them to this particular object</li>
+</ol>
+
+<p>Depending on the case, you might even want to construct an <em>offer</em> string for your HyperLogLog value as composite key of multiple values in the row. But no matter what you do, keep in mind — it is way better and much more efficient to keep the offers and merge those into the existing HyperLogLog value, rather than merging multiple HyperLogLog values.</p>
+
+<p>Lets drop a little code sketch real quick to compare them:</p>
+<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='kd'>ns </span><span class='nv'>...</span>
+  <span class='p'>(</span><span class='ss'>:import</span> <span class='p'>[</span><span class='nv'>com.clearspring.analytics.stream.cardinality</span> <span class='nv'>HyperLogLog</span> <span class='nv'>HyperLogLog$Builder</span><span class='p'>]))</span>
+
 <span class='c1'>;; single hyperloglog value, multiple inserts</span>
-<span class='c1'>;;</span>
-<span class='p'>(</span><span class='nb'>time </span>
-	<span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>n</span> <span class='mi'>1000000</span><span class='p'>]</span> 
-		<span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>h</span> <span class='p'>(</span><span class='nb'>str </span><span class='s'>&quot;check&quot;</span> <span class='nv'>n</span><span class='p'>))))</span>
+<span class='p'>(</span><span class='nf'>time</span>
+  <span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>n</span> <span class='mi'>1000000</span><span class='p'>]</span>
+    <span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>h</span> <span class='p'>(</span><span class='nb'>str </span><span class='s'>&quot;check&quot;</span> <span class='nv'>n</span><span class='p'>))))</span>
 
-<span class='c1'>;;</span>
-<span class='c1'>;; and this is like if we are merging hyperloglogs all the time; </span>
+<span class='c1'>;; and this is like if we are merging hyperloglogs all the time;</span>
 <span class='c1'>;; note that we have to create hyperloglog value every time</span>
-<span class='c1'>;;</span>
-<span class='p'>(</span><span class='nb'>time </span>
-	<span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>n</span> <span class='mi'>1000000</span><span class='p'>]</span> 
-		<span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h</span> <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>nh</span> <span class='p'>(</span><span class='nf'>create</span><span class='p'>)]</span>
-			<span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>nh</span> <span class='p'>(</span><span class='nb'>str </span><span class='s'>&quot;check&quot;</span> <span class='nv'>n</span><span class='p'>))</span>
-			<span class='nv'>nh</span><span class='p'>))))</span>
+<span class='p'>(</span><span class='nf'>time</span>
+  <span class='p'>(</span><span class='nb'>dotimes </span><span class='p'>[</span><span class='nv'>n</span> <span class='mi'>1000000</span><span class='p'>]</span>
+    <span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h</span> <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>nh</span> <span class='p'>(</span><span class='nf'>create</span><span class='p'>)]</span>
+      <span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>nh</span> <span class='p'>(</span><span class='nb'>str </span><span class='s'>&quot;check&quot;</span> <span class='nv'>n</span><span class='p'>))</span>
+      <span class='nv'>nh</span><span class='p'>))))</span>
 </code></pre></div>
 <p>Here is a sample time comparison <code>offer</code> vs <code>merge</code> result:</p>
 <table><thead><tr><th>operation</th><th>execution 1</th><th>execution 2</th><th>execution 3</th><th>execution 4</th></tr></thead><tbody><tr><td style="text-align: center;"><code>offer</code></td><td style="text-align: center;">1513.87 msecs</td><td style="text-align: center;">1479.377 msecs</td><td style="text-align: center;">1493.119 msecs</td><td style="text-align: center;">1485.23 msecs</td></tr>
 <tr><td style="text-align: center;"><code>merge</code></td><td style="text-align: center;">7433.302 msecs</td><td style="text-align: center;">7306.165 msecs</td><td style="text-align: center;">7369.459 msecs</td><td style="text-align: center;">7246.366 msecs</td></tr>
-</tbody></table>
-<p>Most of the time, you would have a <code>source</code> cascalog query to provide normalized incoming input, and our case wont be any <strong>different</strong>.</p>
-
+</tbody></table><p style='text-align: center;'>Table 3. HyperLogLog offer vs merge execution times</p><div class='note'>Store list of raw distinct values and offer them to a single HyperLogLog object instead of merging separate HyperLogLog values, when possible.</div>
 <h2 id="reducing">Reducing</h2>
 
-<p>Now, once we have read files, reducing in Cascalog is rather easy and straighforward, yet we will throw in some code in order to deal with hyperloglog values in an easy way:</p>
+<p>Now, once we have read files, reducing in Cascalog is rather easy and straightforward, yet we will throw in some code in order to deal with HyperLogLog values in an easy way:</p>
 <div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='kd'>defmulti </span><span class='nv'>merge</span>
-          <span class='s'>&quot;Merge two HyperLogLog objects.</span>
-
-<span class='s'>           If one of values is an offer, then it will be offered to the HyperLogLog</span>
-<span class='s'>           value.  If both values are offers, new HyperLogLog will be created and both</span>
-<span class='s'>           values will be offered to this newly created value.&quot;</span>
-          <span class='p'>(</span><span class='k'>fn </span><span class='p'>[</span><span class='nb'>left </span><span class='nv'>right</span><span class='p'>]</span> <span class='p'>[(</span><span class='nb'>class </span><span class='nv'>left</span><span class='p'>)</span> <span class='p'>(</span><span class='nb'>class </span><span class='nv'>right</span><span class='p'>)]))</span>
+  <span class='s'>&quot;Merge two HyperLogLog objects.</span>
+<span class='s'>   If one of values is an offer, then it will</span>
+<span class='s'>   be offered to the HyperLogLog value.  If both</span>
+<span class='s'>   values are offers, new HyperLogLog will be</span>
+<span class='s'>   created and both values will be offered to</span>
+<span class='s'>   this newly created value.&quot;</span>
+  <span class='p'>(</span><span class='k'>fn </span><span class='p'>[</span><span class='nb'>left </span><span class='nv'>right</span><span class='p'>]</span> <span class='p'>[(</span><span class='nb'>class </span><span class='nv'>left</span><span class='p'>)</span> <span class='p'>(</span><span class='nb'>class </span><span class='nv'>right</span><span class='p'>)]))</span>
 
 <span class='p'>(</span><span class='kd'>defmethod </span><span class='nb'>merge </span><span class='p'>[</span><span class='nv'>HyperLogLog</span> <span class='nv'>HyperLogLog</span><span class='p'>]</span> <span class='p'>[</span><span class='nb'>left </span><span class='nv'>right</span><span class='p'>]</span>
   <span class='p'>(</span><span class='nf'>.addAll</span> <span class='nb'>left </span><span class='nv'>right</span><span class='p'>)</span>
@@ -216,78 +235,68 @@
     <span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>acc</span> <span class='nv'>right</span><span class='p'>)</span>
     <span class='nv'>acc</span><span class='p'>))</span>
 </code></pre></div>
-<p>As you can see, this will merge whatever you feed it, and provide you with the hyperloglog value.</p>
-
-<p>Now we throw some cascalog glue in:</p>
-<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='kd'>defn </span><span class='nv'>merge-n</span>
-  <span class='p'>([</span><span class='nv'>h1</span><span class='p'>]</span> <span class='nv'>h1</span><span class='p'>)</span>
-  <span class='p'>([</span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>]</span> <span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>))</span>
-  <span class='p'>([</span><span class='nv'>h1</span> <span class='nv'>h2</span> <span class='o'>&amp;</span> <span class='nv'>more</span><span class='p'>]</span>
-   <span class='p'>(</span><span class='nb'>reduce merge </span><span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>)</span> <span class='nv'>more</span><span class='p'>)))</span>
-
-<span class='p'>(</span><span class='kd'>defn </span><span class='nv'>identity</span>
-  <span class='p'>{</span><span class='ss'>:static</span> <span class='nv'>true</span><span class='p'>}</span>
-  <span class='p'>[</span><span class='nv'>value</span><span class='p'>]</span>
-  <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>res</span> <span class='p'>(</span><span class='nf'>create</span><span class='p'>)]</span>
-    <span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>res</span> <span class='nv'>value</span><span class='p'>)</span>
-    <span class='nv'>res</span><span class='p'>))</span>
-
-<span class='p'>(</span><span class='nf'>c/defparallelagg</span> <span class='nv'>parallel-sum</span>
-                  <span class='ss'>:init-var</span> <span class='o'>#</span><span class='ss'>&#39;identity</span>
-                  <span class='ss'>:combine-var</span> <span class='o'>#</span><span class='ss'>&#39;merge-n</span><span class='p'>)</span>
-
-<span class='p'>(</span><span class='k'>def </span><span class='nv'>sum</span> <span class='p'>(</span><span class='nf'>ops/each</span> <span class='nv'>parallel-sum</span><span class='p'>))</span>
+<p>As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. This would allow us to throw in some glue to merge HyperLogLog values in the Cascalog queries:</p>
+<div class='highlight'><pre><code class='clojure'><span class='lineno'> 1</span> <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>merge-n</span>
+<span class='lineno'> 2</span>   <span class='p'>([</span><span class='nv'>h1</span><span class='p'>]</span> <span class='nv'>h1</span><span class='p'>)</span>
+<span class='lineno'> 3</span>   <span class='p'>([</span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>]</span> <span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>))</span>
+<span class='lineno'> 4</span>   <span class='p'>([</span><span class='nv'>h1</span> <span class='nv'>h2</span> <span class='o'>&amp;</span> <span class='nv'>more</span><span class='p'>]</span>
+<span class='lineno'> 5</span>    <span class='p'>(</span><span class='nb'>reduce merge </span><span class='p'>(</span><span class='nb'>merge </span><span class='nv'>h1</span> <span class='nv'>h2</span><span class='p'>)</span> <span class='nv'>more</span><span class='p'>)))</span>
+<span class='lineno'> 6</span> 
+<span class='lineno'> 7</span> <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>identity</span>
+<span class='lineno'> 8</span>   <span class='p'>{</span><span class='ss'>:static</span> <span class='nv'>true</span><span class='p'>}</span>
+<span class='lineno'> 9</span>   <span class='p'>[</span><span class='nv'>value</span><span class='p'>]</span>
+<span class='lineno'>10</span>   <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>res</span> <span class='p'>(</span><span class='nf'>create</span><span class='p'>)]</span>
+<span class='lineno'>11</span>     <span class='p'>(</span><span class='nf'>.offer</span> <span class='nv'>res</span> <span class='nv'>value</span><span class='p'>)</span>
+<span class='lineno'>12</span>     <span class='nv'>res</span><span class='p'>))</span>
+<span class='lineno'>13</span> 
+<span class='lineno'>14</span> <span class='p'>(</span><span class='nf'>c/defparallelagg</span> <span class='nv'>parallel-sum</span>
+<span class='lineno'>15</span>                   <span class='ss'>:init-var</span> <span class='o'>#</span><span class='ss'>&#39;identity</span>
+<span class='lineno'>16</span>                   <span class='ss'>:combine-var</span> <span class='o'>#</span><span class='ss'>&#39;merge-n</span><span class='p'>)</span>
+<span class='lineno'>17</span> 
+<span class='lineno'>18</span> <span class='p'>(</span><span class='k'>def </span><span class='nv'>sum</span> <span class='p'>(</span><span class='nf'>ops/each</span> <span class='nv'>parallel-sum</span><span class='p'>))</span>
 </code></pre></div>
-<p>This operations will <em>“summ up”</em> all the offers, the same way you would’ve use <code>cascalog.ops/sum</code> operation on numerical values. In a cascalog query it will end simply up as:</p>
-<div class='highlight'><pre><code class='clojure'>    <span class='p'>(</span><span class='nf'>c/&lt;-</span> <span class='p'>[</span><span class='nv'>?city</span> <span class='nv'>?district</span> <span class='nv'>?hll</span><span class='p'>]</span>
-      <span class='p'>(</span><span class='nf'>ov-source</span> <span class='ss'>:&gt;&gt;</span> <span class='nv'>ov-fields</span><span class='p'>)</span>
-      <span class='p'>(</span><span class='nf'>hll/sum</span> <span class='nv'>?uuid</span> <span class='ss'>:&gt;</span> <span class='nv'>?hll</span><span class='p'>))</span>
+<p>This operations will <em>“sum up”</em> all the offers, the same way you would’ve use <code>cascalog.ops/sum</code> operation on numerical values, you can use this operation on HyperLogLog values. In a cascalog query it will end up simply as:</p>
+<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='nf'>c/&lt;-</span> <span class='p'>[</span><span class='nv'>?city</span> <span class='nv'>?district</span> <span class='nv'>?hll</span><span class='p'>]</span>
+  <span class='p'>(</span><span class='nf'>ov-source</span> <span class='ss'>:&gt;&gt;</span> <span class='nv'>ov-fields</span><span class='p'>)</span>
+  <span class='p'>(</span><span class='nf'>hll/sum</span> <span class='nv'>?uuid</span> <span class='ss'>:&gt;</span> <span class='nv'>?hll</span><span class='p'>))</span>
 </code></pre></div>
-<blockquote>
-<p>todo: ilya — stress out that we are not mergin HLL’s among each other</p>
-</blockquote>
-
-<h2 id="persisting">Persisting</h2>
+<h2 id="persistent">Persistent</h2>
 
 <p>HyperLogLog is an object, basically a set or register set’s under the hood, and might you want to persist it — you will require to serialize it somehow.</p>
 
-<p>Now in order to use some sort of JDBC Tap, you’ll need to store your bytes sequence, which Cascalog is in a form of string of some kind; without diving too deep, we simply encode it with <code>base64</code> and throw it is as an UTF-8 string; so the whole cascalog query will look like this:</p>
-<div class='highlight'><pre><code class='clojure'><span class='p'>(</span><span class='nf'>c/defmapop</span> <span class='nv'>stringify</span> <span class='p'>[</span><span class='nv'>hll-object</span><span class='p'>]</span>
-    <span class='p'>[(</span><span class='nf'>Base64/encodeBase64String</span> <span class='p'>(</span><span class='nf'>.getBytes</span> <span class='nv'>hll-object</span><span class='p'>))])</span>
-
-<span class='p'>(</span><span class='kd'>defn </span><span class='nv'>get-day-n-year</span> <span class='p'>[</span><span class='nv'>epoch-time</span><span class='p'>]</span>
-  <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span> <span class='nv'>epoch-time-long</span> <span class='p'>(</span><span class='nf'>Long/parseLong</span> <span class='nv'>epoch-time</span><span class='p'>)</span>
-         <span class='nv'>in-millis</span> <span class='p'>(</span><span class='nb'>* </span><span class='nv'>epoch-time-long</span> <span class='mi'>1000</span><span class='p'>)</span>
-        <span class='nv'>date</span> <span class='p'>(</span><span class='nf'>time2/from-long</span> <span class='nv'>in-millis</span><span class='p'>)]</span>
-    <span class='p'>[(</span><span class='nf'>.getDayOfYear</span> <span class='nv'>date</span><span class='p'>)</span> <span class='p'>(</span><span class='nf'>.getYear</span> <span class='nv'>date</span><span class='p'>)]))</span>
-
-<span class='p'>(</span><span class='kd'>defn </span><span class='nv'>count-gvb-passengers</span> <span class='p'>[</span><span class='nv'>path</span><span class='p'>]</span>
-  <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>ov-source</span> <span class='p'>(</span><span class='nf'>ov-source</span> <span class='nv'>path</span><span class='p'>)]</span>
-    <span class='p'>(</span><span class='nf'>c/&lt;-</span> <span class='p'>[</span><span class='nv'>?city</span> <span class='nv'>?district</span> <span class='nv'>?day</span> <span class='nv'>?year</span> <span class='nv'>?cardinality</span> <span class='nv'>?base64-hll</span><span class='p'>]</span>
-
-          <span class='p'>(</span><span class='ss'>:trap</span> <span class='p'>(</span><span class='nf'>c/hfs-textline</span> <span class='s'>&quot;/tmp/hll-demo-errors&quot;</span> <span class='ss'>:sinkmode</span> <span class='ss'>:replace</span> <span class='p'>))</span>
-
-          <span class='p'>(</span><span class='nf'>ov-source</span> <span class='ss'>:&gt;&gt;</span> <span class='nv'>ov-fields</span><span class='p'>)</span>
-
-          <span class='p'>(</span><span class='nf'>hll/sum</span> <span class='nv'>?uuid</span> <span class='ss'>:&gt;</span> <span class='nv'>?hll</span><span class='p'>)</span>
-          <span class='p'>(</span><span class='nf'>cardinality</span> <span class='nv'>?hll</span> <span class='ss'>:&gt;</span> <span class='nv'>?cardinality</span><span class='p'>)</span>
-          <span class='p'>(</span><span class='nf'>get-day-n-year</span> <span class='nv'>?timestamp</span> <span class='ss'>:&gt;</span> <span class='nv'>?day</span> <span class='nv'>?year</span><span class='p'>)</span>
-          <span class='p'>(</span><span class='nf'>hll/stringify</span> <span class='nv'>?hll</span> <span class='ss'>:&gt;</span> <span class='nv'>?base64-hll</span><span class='p'>))))</span>
+<p>Now in order to use some sort of Tap, you’ll need to store your bytes sequence, which in case of Cascalog is in a form of string of some kind; since at the moment we use both JDBC Taps and plain CSV files, without diving too deep, we simply encode it with <code>base64</code> and throw it is as an UTF-8 string; so the whole cascalog query will look like this:</p>
+<div class='highlight'><pre><code class='clojure'><span class='lineno'> 1</span> <span class='p'>(</span><span class='nf'>c/defmapop</span> <span class='nv'>stringify</span> <span class='p'>[</span><span class='nv'>hll-object</span><span class='p'>]</span>
+<span class='lineno'> 2</span>   <span class='p'>[(</span><span class='nf'>Base64/encodeBase64String</span> <span class='p'>(</span><span class='nf'>.getBytes</span> <span class='nv'>hll-object</span><span class='p'>))])</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>get-day-n-year</span> <span class='p'>[</span><span class='nv'>epoch-time</span><span class='p'>]</span>
+<span class='lineno'> 5</span>   <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span> <span class='nv'>epoch-time-long</span> <span class='p'>(</span><span class='nf'>Long/parseLong</span> <span class='nv'>epoch-time</span><span class='p'>)</span>
+<span class='lineno'> 6</span>          <span class='nv'>in-millis</span> <span class='p'>(</span><span class='nb'>* </span><span class='nv'>epoch-time-long</span> <span class='mi'>1000</span><span class='p'>)</span>
+<span class='lineno'> 7</span>          <span class='nv'>date</span> <span class='p'>(</span><span class='nf'>time2/from-long</span> <span class='nv'>in-millis</span><span class='p'>)]</span>
+<span class='lineno'> 8</span>     <span class='p'>[(</span><span class='nf'>.getDayOfYear</span> <span class='nv'>date</span><span class='p'>)</span> <span class='p'>(</span><span class='nf'>.getYear</span> <span class='nv'>date</span><span class='p'>)]))</span>
+<span class='lineno'> 9</span> 
+<span class='lineno'>10</span> <span class='p'>(</span><span class='kd'>defn </span><span class='nv'>count-gvb-passengers</span> <span class='p'>[</span><span class='nv'>path</span><span class='p'>]</span>
+<span class='lineno'>11</span>   <span class='p'>(</span><span class='k'>let </span><span class='p'>[</span><span class='nv'>ov-source</span> <span class='p'>(</span><span class='nf'>ov-source</span> <span class='nv'>path</span><span class='p'>)]</span>
+<span class='lineno'>12</span>     <span class='p'>(</span><span class='nf'>c/&lt;-</span> <span class='p'>[</span><span class='nv'>?city</span> <span class='nv'>?district</span> <span class='nv'>?day</span> <span class='nv'>?year</span> <span class='nv'>?cardinality</span> <span class='nv'>?base64-hll</span><span class='p'>]</span>
+<span class='lineno'>13</span> 
+<span class='lineno'>14</span>       <span class='p'>(</span><span class='ss'>:trap</span> <span class='p'>(</span><span class='nf'>c/hfs-textline</span> <span class='s'>&quot;/tmp/hll-demo-errors&quot;</span> <span class='ss'>:sinkmode</span> <span class='ss'>:replace</span> <span class='p'>))</span>
+<span class='lineno'>15</span> 
+<span class='lineno'>16</span>       <span class='p'>(</span><span class='nf'>ov-source</span> <span class='ss'>:&gt;&gt;</span> <span class='nv'>ov-fields</span><span class='p'>)</span>
+<span class='lineno'>17</span> 
+<span class='lineno'>18</span>       <span class='p'>(</span><span class='nf'>hll/sum</span> <span class='nv'>?uuid</span> <span class='ss'>:&gt;</span> <span class='nv'>?hll</span><span class='p'>)</span>
+<span class='lineno'>19</span>       <span class='p'>(</span><span class='nf'>cardinality</span> <span class='nv'>?hll</span> <span class='ss'>:&gt;</span> <span class='nv'>?cardinality</span><span class='p'>)</span>
+<span class='lineno'>20</span>       <span class='p'>(</span><span class='nf'>get-day-n-year</span> <span class='nv'>?timestamp</span> <span class='ss'>:&gt;</span> <span class='nv'>?day</span> <span class='nv'>?year</span><span class='p'>)</span>
+<span class='lineno'>21</span>       <span class='p'>(</span><span class='nf'>hll/stringify</span> <span class='nv'>?hll</span> <span class='ss'>:&gt;</span> <span class='nv'>?base64-hll</span><span class='p'>))))</span>
 </code></pre></div>
-<p>Note that we through in day and year parsing. Now we have nice rows district-day with the amount of passengers see on that day, which can be cheaply merged in the runtime (whenever you request statistics through any online tooling). Sweeet.</p>
+<p>Note that we throw in day and year parsing.</p>
 
-<h3 id="how_much_would_it_take">How much would it take?</h3>
+<p>Now we have nice rows grouped by <code>(district, day)</code> key with the amount of passengers seen that day, which can be cheaply merged in the runtime (whenever you request statistics through any online tooling).</p>
 
-<blockquote>
-<p>todo: ilya — cover up how much would memmory and why would it take to persist current hyperloglog fields in postgress with base64 utf8 encoding</p>
-</blockquote>
+<p>Sweeet.</p>
 
 <h1 id="gist">Gist</h1>
 
-<blockquote>
-<p>todo: ilya — provide nicelt looking gist for this code</p>
-</blockquote>
-
+<p>And, of course, here is the full gist, of the code I used to demo HyperLogLog with Cascalog in this article:</p>
+<script src='https://gist.github.com/7319327.js'><![CDATA[ ]]></script>
 <h1 id="links">Links</h1>
 
 <ol>
@@ -298,7 +307,15 @@
 <li><a href="https://github.com/nathanmarz/cascalog">Cascalog: Data processing on Hadoop without the hassle</a></li>
 </ol>
 
+<p><em>[Originally published in <a href="http://screen6.github.io/blog/2013/10/25/hyperloglog-with-cascalog.html">Screen6 Technical Blog</a> on 20/25/2013]</em></p>
+
 </div>
+
+
+<div id="author">
+  by <a href="http://ilyapimenov.com/">Ilya Pimenov</a>
+</div>
+
 
 
     <div id="disqus_thread"></div>
