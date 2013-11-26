@@ -6,6 +6,7 @@ comments: true
 categories:
 - blog
 ---
+ _Updated: 22 nov 2013_
 
 We'll look briefly in how you would utilize awesomeness of both Cascalog and HyperLogLog in order to execute Hadoop M/R tasks with amounts of data too big to have them in their original form.
 
@@ -117,7 +118,7 @@ Now, you can either go and implement your own implementation of HyperLogLog that
 
 <p style="text-align: center;">Table 2. Available HyperLogLog implementations</p>
 
-We chose [AddThis](http://www.addthis.com/)'s [Stream-Lib](https://github.com/addthis/stream-lib)'s implementation, as from my subjective point of view it seemed to be most clear, nicely documented and reasonable implementatable; besides, they added a bunch of other sweet things for cardinality estimation in that same library, together with the list of papers their implementations were based upon.
+We chose [AddThis](http://www.addthis.com/)'s [Stream-Lib](https://github.com/addthis/stream-lib)'s implementation, as from my subjective point of view it seemed to be most clear, nicely documented and reasonably implemented; besides, they added a bunch of other sweet things for cardinality estimation in that same library, together with the list of papers their implementations were based upon.
 
 ## Creating offers
 
@@ -164,61 +165,44 @@ Here is a sample time comparison `offer` vs `merge` result:
 Now, once we have read files, reducing in Cascalog is rather easy and straightforward, yet we will throw in some code in order to deal with HyperLogLog values in an easy way:
 
 {% highlight clojure %}
-(defmulti merge
-  "Merge two HyperLogLog objects.
-   If one of values is an offer, then it will
-   be offered to the HyperLogLog value.  If both
-   values are offers, new HyperLogLog will be
-   created and both values will be offered to
-   this newly created value."
-  (fn [left right] [(class left) (class right)]))
-
-(defmethod merge [HyperLogLog HyperLogLog] [left right]
-  (.addAll left right)
-  left)
-
-(defmethod merge [HyperLogLog String] [left right]
-  (.offer left right)
-  left)
-
-(defmethod merge [String HyperLogLog] [left right]
-  (.offer right left)
-  right)
-
-(defmethod merge [nil HyperLogLog] [left right]
-  right)
-
-(defmethod merge [HyperLogLog nil] [left right]
-  left)
-
-(defmethod merge [String String] [left right]
-  (let [acc (create)]
-    (.offer acc left)
-    (.offer acc right)
-    acc))
+(defprotocol IHyperLogLogMerge 
+  (hyperloglog-val [this])
+  (merge [this other])
+  (merge-with-hyperloglog [this other-hll]))
+ 
+(extend-protocol IHyperLogLogMerge
+  nil
+  (hyperloglog-val [this] nil)
+  (merge-with-hyperloglog [this other-hll] other-hll)
+  (merge [this other] other)
+ 
+  Object
+  (hyperloglog-val [this] (doto (create) (.offer this)))
+  (merge-with-hyperloglog [this other-hll] (.offer other-hll this) other-hll)
+  (merge [this other]
+    (merge (hyperloglog-val other) this))
+ 
+  HyperLogLog
+  (hyperloglog-val [this] this)
+  (merge-with-hyperloglog [this other-hll] (.addAll this other-hll) this)
+  (merge [this other]
+    (merge-with-hyperloglog other this)))
 {% endhighlight %}
 
-As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. This would allow us to throw in some glue to merge HyperLogLog values in the Cascalog queries:
+As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. Though, not used in this particular example, will be used extensively in reallife scenario, when aggregating already obtainded aggregated results (that will hold not offers, but HyperLogLog values). 
+
+And then finally, let's throw in some glue to aggregate HyperLogLog values in the Cascalog queries:
 
 {% highlight clojure linenos %}
-(defn merge-n
-  ([h1] h1)
-  ([h1 h2] (merge h1 h2))
-  ([h1 h2 & more]
-   (reduce merge (merge h1 h2) more)))
-
-(defn identity
-  {:static true}
-  [value]
-  (let [res (create)]
-    (.offer res value)
-    res))
-
-(c/defparallelagg parallel-sum
-                  :init-var #'identity
-                  :combine-var #'merge-n)
-
-(def sum (ops/each parallel-sum))
+(c/defaggregateop sum*
+  ([] (create))
+  ([state val]
+    (.offer state val)
+    state)
+  ([state] [state]))
+  
+(def sum
+  (ops/each sum*))
 {% endhighlight %}
 
 This operations will _"sum up"_ all the offers, the same way you would've use `cascalog.ops/sum` operation on numerical values, you can use this operation on HyperLogLog values. In a cascalog query it will end up simply as:
@@ -267,7 +251,31 @@ Sweeet.
 
 # Gist
 
-And, of course, here is the full gist, of the code I used to demo HyperLogLog with Cascalog in this article:
+And, of course, here is the full gist, of the code I used to demo HyperLogLog with Cascalog in this article; in order to run:
+
+{% highlight bash %}
+  $ git clone https://gist.github.com/7319327.git
+  $ cd cd ./7319327/
+  $ lein demo ./ov-chipkaart-accesslogs.txt
+{% endhighlight %}
+
+It will produce output like:
+
+| ?city | ?district | ?day | ?year | ?cardinality |
+|:------|:---------:|:----:|:-----:|:------------:|
+| Amsterdam | 6427 | 327 | 2012 | 1 |
+| Amsterdam | 6427 | 328 | 2012 | 3 |
+| Delft | 2290 | 53 | 2013 | 1 |
+| Delft | 3855 | 109 | 2013 | 1 |
+| Delft | 4091 | 74 | 2013 | 1 |
+| Delft | 5589 | 200 | 2013 | 1 |
+| Den-Haag | 3797 | 300 | 2013 | 1 |
+| Edam | 3886 | 47 | 2013 | 1 |
+| Edam | 5594 | 272 | 2013 | 1 |
+| Haarlem | 1134 | 108 | 2013 | 1 |
+| Haarlem | 4584 | 220 | 2013 | 1 |
+
+<p style="text-align: center;">Table 4. Demo output</p>
 
 {% gist 7319327 %}
 
@@ -276,5 +284,3 @@ And, of course, here is the full gist, of the code I used to demo HyperLogLog wi
 1. [Clojure: Dynamic programming language that target Java Virtual Machine](http://clojure.org/)
 1. [HyperLogLog — Cornerstone of a Big Data Infrastructure](http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/)
 1. [Cascalog: Data processing on Hadoop without the hassle](https://github.com/nathanmarz/cascalog)
-
-_&#91;Originally published in [Screen6 Technical Blog](http://screen6.github.io/blog/2013/10/25/hyperloglog-with-cascalog.html) on 20/25/2013&#93;_
