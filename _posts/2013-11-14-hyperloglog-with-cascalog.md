@@ -284,3 +284,5 @@ It will produce output like:
 1. [Clojure: Dynamic programming language that target Java Virtual Machine](http://clojure.org/)
 1. [HyperLogLog — Cornerstone of a Big Data Infrastructure](http://blog.aggregateknowledge.com/2012/10/25/sketch-of-the-day-hyperloglog-cornerstone-of-a-big-data-infrastructure/)
 1. [Cascalog: Data processing on Hadoop without the hassle](https://github.com/nathanmarz/cascalog)
+
+_&#91;Originally published in [Screen6 Technical Blog](http://screen6.github.io/blog/2013/11/13/hyperloglog-with-cascalog.html) on 20/25/2013&#93;_
