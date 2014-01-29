@@ -4,7 +4,7 @@
  <title>The blog of Ilya Pimenov</title>
  <link href="http://example.com/atom.xml" rel="self"/>
  <link href="http://example.com"/>
- <updated>2013-11-13T17:01:16+01:00</updated>
+ <updated>2014-01-29T01:53:18+01:00</updated>
  <id>http://example.com</id>
  <author>
    <name>Ilya Pimenov</name>
@@ -14,10 +14,12 @@
  
  <entry>
    <title>HyperLogLog with Cascalog</title>
-   <link href="http://example.com/blog/2013/10/25/hyperloglog-with-cascalog.html"/>
-   <updated>2013-10-25T00:00:00+02:00</updated>
-   <id>http://example.com/blog/2013/10/25/hyperloglog-with-cascalog</id>
+   <link href="http://example.com/blog/2013/11/14/hyperloglog-with-cascalog.html"/>
+   <updated>2013-11-14T00:00:00+01:00</updated>
+   <id>http://example.com/blog/2013/11/14/hyperloglog-with-cascalog</id>
    <content type="html">
+&lt;p&gt;&lt;em&gt;Updated: 22 nov 2013&lt;/em&gt;&lt;/p&gt;
+
 &lt;p&gt;We’ll look briefly in how you would utilize awesomeness of both Cascalog and HyperLogLog in order to execute Hadoop M/R tasks with amounts of data too big to have them in their original form.&lt;/p&gt;
 &lt;hr /&gt;
 &lt;h1 id=&quot;intro&quot;&gt;Intro&lt;/h1&gt;
@@ -105,7 +107,7 @@
 &lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;AddThis&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;a href=&quot;https://github.com/addthis/stream-lib&quot;&gt;Stream-Lib&lt;/a&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;a href=&quot;https://github.com/addthis/stream-lib/blob/master/src/main/java/com/clearspring/analytics/stream/cardinality/HyperLogLog.java&quot;&gt;HyperLogLog.java&lt;/a&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Java&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Apache License 2.0&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;indie!&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;a href=&quot;https://gist.github.com/yukim&quot;&gt;yukim’s gists&lt;/a&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;&lt;a href=&quot;https://gist.github.com/yukim/2597943#file-hyperloglog-java&quot;&gt;HyperLogLog.java&lt;/a&gt;&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Java&lt;/td&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Apache License 2.0&lt;/td&gt;&lt;/tr&gt;
 &lt;/tbody&gt;&lt;/table&gt;&lt;p style='text-align: center;'&gt;Table 2. Available HyperLogLog implementations&lt;/p&gt;
-&lt;p&gt;We chose &lt;a href=&quot;http://www.addthis.com/&quot;&gt;AddThis&lt;/a&gt;’s &lt;a href=&quot;https://github.com/addthis/stream-lib&quot;&gt;Stream-Lib&lt;/a&gt;’s implementation, as from my subjective point of view it seemed to be most clear, nicely documented and reasonable implementatable; besides, they added a bunch of other sweet things for cardinality estimation in that same library, together with the list of papers their implementations were based upon.&lt;/p&gt;
+&lt;p&gt;We chose &lt;a href=&quot;http://www.addthis.com/&quot;&gt;AddThis&lt;/a&gt;’s &lt;a href=&quot;https://github.com/addthis/stream-lib&quot;&gt;Stream-Lib&lt;/a&gt;’s implementation, as from my subjective point of view it seemed to be most clear, nicely documented and reasonably implemented; besides, they added a bunch of other sweet things for cardinality estimation in that same library, together with the list of papers their implementations were based upon.&lt;/p&gt;
 
 &lt;h2 id=&quot;creating_offers&quot;&gt;Creating offers&lt;/h2&gt;
 
@@ -143,58 +145,41 @@
 &lt;h2 id=&quot;reducing&quot;&gt;Reducing&lt;/h2&gt;
 
 &lt;p&gt;Now, once we have read files, reducing in Cascalog is rather easy and straightforward, yet we will throw in some code in order to deal with HyperLogLog values in an easy way:&lt;/p&gt;
-&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmulti &lt;/span&gt;&lt;span class='nv'&gt;merge&lt;/span&gt;
-  &lt;span class='s'&gt;&amp;quot;Merge two HyperLogLog objects.&lt;/span&gt;
-&lt;span class='s'&gt;   If one of values is an offer, then it will&lt;/span&gt;
-&lt;span class='s'&gt;   be offered to the HyperLogLog value.  If both&lt;/span&gt;
-&lt;span class='s'&gt;   values are offers, new HyperLogLog will be&lt;/span&gt;
-&lt;span class='s'&gt;   created and both values will be offered to&lt;/span&gt;
-&lt;span class='s'&gt;   this newly created value.&amp;quot;&lt;/span&gt;
-  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;fn &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[(&lt;/span&gt;&lt;span class='nb'&gt;class &lt;/span&gt;&lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;class &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)]))&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.addAll&lt;/span&gt; &lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;String&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;String&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nb'&gt;right &lt;/span&gt;&lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-  &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;nil&lt;/span&gt; &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;HyperLogLog&lt;/span&gt; &lt;span class='nv'&gt;nil&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-
-&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defmethod &lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;String&lt;/span&gt; &lt;span class='nv'&gt;String&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nb'&gt;left &lt;/span&gt;&lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
-    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='nv'&gt;left&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;acc&lt;/span&gt; &lt;span class='nv'&gt;right&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-    &lt;span class='nv'&gt;acc&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defprotocol &lt;/span&gt;&lt;span class='nv'&gt;IHyperLogLogMerge&lt;/span&gt; 
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hyperloglog-val&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;]))&lt;/span&gt;
+ 
+&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;extend-protocol&lt;/span&gt; &lt;span class='nv'&gt;IHyperLogLogMerge&lt;/span&gt;
+  &lt;span class='nv'&gt;nil&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hyperloglog-val&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;nil&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+ 
+  &lt;span class='nv'&gt;Object&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hyperloglog-val&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;doto &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;)))&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hyperloglog-val&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+ 
+  &lt;span class='nv'&gt;HyperLogLog&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;hyperloglog-val&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.addAll&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other-hll&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+  &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;this&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class='nv'&gt;other&lt;/span&gt; &lt;span class='nv'&gt;this&lt;/span&gt;&lt;span class='p'&gt;)))&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. This would allow us to throw in some glue to merge HyperLogLog values in the Cascalog queries:&lt;/p&gt;
-&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='lineno'&gt; 1&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;merge-n&lt;/span&gt;
-&lt;span class='lineno'&gt; 2&lt;/span&gt;   &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='nv'&gt;h1&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-&lt;span class='lineno'&gt; 3&lt;/span&gt;   &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
-&lt;span class='lineno'&gt; 4&lt;/span&gt;   &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt; &lt;span class='o'&gt;&amp;amp;&lt;/span&gt; &lt;span class='nv'&gt;more&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-&lt;span class='lineno'&gt; 5&lt;/span&gt;    &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;reduce merge &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nb'&gt;merge &lt;/span&gt;&lt;span class='nv'&gt;h1&lt;/span&gt; &lt;span class='nv'&gt;h2&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='nv'&gt;more&lt;/span&gt;&lt;span class='p'&gt;)))&lt;/span&gt;
-&lt;span class='lineno'&gt; 6&lt;/span&gt; 
-&lt;span class='lineno'&gt; 7&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='kd'&gt;defn &lt;/span&gt;&lt;span class='nv'&gt;identity&lt;/span&gt;
-&lt;span class='lineno'&gt; 8&lt;/span&gt;   &lt;span class='p'&gt;{&lt;/span&gt;&lt;span class='ss'&gt;:static&lt;/span&gt; &lt;span class='nv'&gt;true&lt;/span&gt;&lt;span class='p'&gt;}&lt;/span&gt;
-&lt;span class='lineno'&gt; 9&lt;/span&gt;   &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;value&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
-&lt;span class='lineno'&gt;10&lt;/span&gt;   &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;let &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;res&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;)]&lt;/span&gt;
-&lt;span class='lineno'&gt;11&lt;/span&gt;     &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;res&lt;/span&gt; &lt;span class='nv'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-&lt;span class='lineno'&gt;12&lt;/span&gt;     &lt;span class='nv'&gt;res&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
-&lt;span class='lineno'&gt;13&lt;/span&gt; 
-&lt;span class='lineno'&gt;14&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/defparallelagg&lt;/span&gt; &lt;span class='nv'&gt;parallel-sum&lt;/span&gt;
-&lt;span class='lineno'&gt;15&lt;/span&gt;                   &lt;span class='ss'&gt;:init-var&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='ss'&gt;&amp;#39;identity&lt;/span&gt;
-&lt;span class='lineno'&gt;16&lt;/span&gt;                   &lt;span class='ss'&gt;:combine-var&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='ss'&gt;&amp;#39;merge-n&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
-&lt;span class='lineno'&gt;17&lt;/span&gt; 
-&lt;span class='lineno'&gt;18&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;sum&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ops/each&lt;/span&gt; &lt;span class='nv'&gt;parallel-sum&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;p&gt;As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. Though, not used in this particular example, will be used extensively in reallife scenario, when aggregating already obtainded aggregated results (that will hold not offers, but HyperLogLog values).&lt;/p&gt;
+
+&lt;p&gt;And then finally, let’s throw in some glue to aggregate HyperLogLog values in the Cascalog queries:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='lineno'&gt;1&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/defaggregateop&lt;/span&gt; &lt;span class='nv'&gt;sum*&lt;/span&gt;
+&lt;span class='lineno'&gt;2&lt;/span&gt;   &lt;span class='p'&gt;([]&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;create&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;span class='lineno'&gt;3&lt;/span&gt;   &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;state&lt;/span&gt; &lt;span class='nv'&gt;val&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+&lt;span class='lineno'&gt;4&lt;/span&gt;     &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;.offer&lt;/span&gt; &lt;span class='nv'&gt;state&lt;/span&gt; &lt;span class='nv'&gt;val&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='lineno'&gt;5&lt;/span&gt;     &lt;span class='nv'&gt;state&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='lineno'&gt;6&lt;/span&gt;   &lt;span class='p'&gt;([&lt;/span&gt;&lt;span class='nv'&gt;state&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;state&lt;/span&gt;&lt;span class='p'&gt;]))&lt;/span&gt;
+&lt;span class='lineno'&gt;7&lt;/span&gt;   
+&lt;span class='lineno'&gt;8&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='k'&gt;def &lt;/span&gt;&lt;span class='nv'&gt;sum&lt;/span&gt;
+&lt;span class='lineno'&gt;9&lt;/span&gt;   &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;ops/each&lt;/span&gt; &lt;span class='nv'&gt;sum*&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;This operations will &lt;em&gt;“sum up”&lt;/em&gt; all the offers, the same way you would’ve use &lt;code&gt;cascalog.ops/sum&lt;/code&gt; operation on numerical values, you can use this operation on HyperLogLog values. In a cascalog query it will end up simply as:&lt;/p&gt;
 &lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='clojure'&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nf'&gt;c/&amp;lt;-&lt;/span&gt; &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nv'&gt;?city&lt;/span&gt; &lt;span class='nv'&gt;?district&lt;/span&gt; &lt;span class='nv'&gt;?hll&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
@@ -236,8 +221,24 @@
 
 &lt;h1 id=&quot;gist&quot;&gt;Gist&lt;/h1&gt;
 
-&lt;p&gt;And, of course, here is the full gist, of the code I used to demo HyperLogLog with Cascalog in this article:&lt;/p&gt;
-&lt;script src='https://gist.github.com/7319327.js'&gt;&lt;![CDATA[ ]]&gt;&lt;/script&gt;
+&lt;p&gt;And, of course, here is the full gist, of the code I used to demo HyperLogLog with Cascalog in this article; in order to run:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;  &lt;span class='nv'&gt;$ &lt;/span&gt;git clone https://gist.github.com/7319327.git
+  &lt;span class='nv'&gt;$ &lt;/span&gt;&lt;span class='nb'&gt;cd cd&lt;/span&gt; ./7319327/
+  &lt;span class='nv'&gt;$ &lt;/span&gt;lein demo ./ov-chipkaart-accesslogs.txt
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;It will produce output like:&lt;/p&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;?city&lt;/th&gt;&lt;th&gt;?district&lt;/th&gt;&lt;th&gt;?day&lt;/th&gt;&lt;th&gt;?year&lt;/th&gt;&lt;th&gt;?cardinality&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Amsterdam&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;6427&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;327&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2012&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Amsterdam&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;6427&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;328&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2012&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;3&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Delft&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2290&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;53&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Delft&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;3855&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;109&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Delft&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;4091&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;74&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Delft&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;5589&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;200&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Den-Haag&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;3797&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;300&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Edam&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;3886&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;47&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Edam&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;5594&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;272&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Haarlem&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1134&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;108&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td style=&quot;text-align: left;&quot;&gt;Haarlem&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;4584&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;220&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;2013&lt;/td&gt;&lt;td style=&quot;text-align: center;&quot;&gt;1&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;&lt;/table&gt;&lt;p style='text-align: center;'&gt;Table 4. Demo output&lt;/p&gt;&lt;script src='https://gist.github.com/7319327.js'&gt;&lt;![CDATA[ ]]&gt;&lt;/script&gt;
 &lt;h1 id=&quot;links&quot;&gt;Links&lt;/h1&gt;
 
 &lt;ol&gt;
@@ -248,7 +249,7 @@
 &lt;li&gt;&lt;a href=&quot;https://github.com/nathanmarz/cascalog&quot;&gt;Cascalog: Data processing on Hadoop without the hassle&lt;/a&gt;&lt;/li&gt;
 &lt;/ol&gt;
 
-&lt;p&gt;&lt;em&gt;[Originally published in &lt;a href=&quot;http://screen6.github.io/blog/2013/10/25/hyperloglog-with-cascalog.html&quot;&gt;Screen6 Technical Blog&lt;/a&gt; on 20/25/2013]&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;[Originally published in &lt;a href=&quot;http://screen6.github.io/blog/2013/11/13/hyperloglog-with-cascalog.html&quot;&gt;Screen6 Technical Blog&lt;/a&gt; on 20/25/2013]&lt;/em&gt;&lt;/p&gt;
 </content>
  </entry>
  
