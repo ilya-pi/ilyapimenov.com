@@ -495,4 +495,4 @@ Four months into the game — works as a charm, easy to monitor. We are very hap
 1. [Installing Lua Rocks on Mac](http://luarocks.org/en/Installation_instructions_for_Mac_OS_X)
 1. [Intro to Lua for Redis programmers](http://www.redisgreen.net/blog/intro-to-lua-for-redis-programmers/)
 
-_&#91;Originally published in [Screen6 Technical Blog](http://screen6.github.io/blog/2014/09/18/lua-scripts-in-redis-within-nodejs.html) on 09/19/2014&#93;_
+_&#91;Originally published in [Screen6 Technical Blog](http://screen6.github.io/blog/2014/09/18/lua-scripts-in-redis-within-nodejs.html) on 09/18/2014&#93;_
