@@ -2,10 +2,10 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
  
  <title>The blog of Ilya Pimenov</title>
- <link href="http://example.com/atom.xml" rel="self"/>
- <link href="http://example.com"/>
- <updated>2014-01-29T01:53:18+01:00</updated>
- <id>http://example.com</id>
+ <link href="http://ilyapimenov.com/atom.xml" rel="self"/>
+ <link href="http://ilyapimenov.com"/>
+ <updated>2014-11-05T10:35:58+01:00</updated>
+ <id>http://ilyapimenov.com</id>
  <author>
    <name>Ilya Pimenov</name>
    <email>ilya.pimenov@gmail.com</email>
@@ -13,10 +13,468 @@
 
  
  <entry>
+   <title>Lua scripts in Redis within Node.js</title>
+   <link href="http://ilyapimenov.com/blog/2014/09/19/lua-scripts-in-redis-within-nodejs.html"/>
+   <updated>2014-09-19T00:00:00+02:00</updated>
+   <id>http://ilyapimenov.com/blog/2014/09/19/lua-scripts-in-redis-within-nodejs</id>
+   <content type="html">
+&lt;p&gt;We don’t need to tell you what Redis is. Most engineers built a strong love to it over the years for the simplicity and power it gives you.&lt;/p&gt;
+
+&lt;p&gt;Although Lua support was introduced quite some time ago, the average internet tells us that it didn’t really kick off.&lt;/p&gt;
+
+&lt;p&gt;Here we share our experience with replacing part of the server side written in Node.JS with the Lua being executed in Redis,&lt;/p&gt;
+
+&lt;h2 id=&quot;why&quot;&gt;Why&lt;/h2&gt;
+
+&lt;p&gt;So, we have this awesome product Bidder, that plays on the add market exchange. And in order to have all nodes notified of current situation, we use Redis database to share the current state, amount of money available to a particular operation among all the bidders running in the cloud.&lt;/p&gt;
+
+&lt;p&gt;This data structure is rather complex and dependent on each other. For example, consider it to be a tree of nodes, where each branch eats cookies&lt;/p&gt;
+
+&lt;p&gt;Like so:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;a &lt;span class='o'&gt;[&lt;/span&gt; ate: 0 &lt;span class='o'&gt;]&lt;/span&gt;
+|--- ab &lt;span class='o'&gt;[&lt;/span&gt; ate: 0 &lt;span class='o'&gt;]&lt;/span&gt;
+      |--- abe &lt;span class='o'&gt;[&lt;/span&gt; ate: 0 &lt;span class='o'&gt;]&lt;/span&gt;
+      |--- abi &lt;span class='o'&gt;[&lt;/span&gt; ate: 0 &lt;span class='o'&gt;]&lt;/span&gt;
+|--- ac &lt;span class='o'&gt;[&lt;/span&gt; ate: 0 &lt;span class='o'&gt;]&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;So, if the branch &lt;code&gt;abe&lt;/code&gt; ate 2 cookies, &lt;code&gt;a&lt;/code&gt; should have a balance of two eaten cookies — &lt;code&gt;a [ ate: 2 ]&lt;/code&gt;. And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt;code&gt;ac&lt;/code&gt; eats &lt;code&gt;1&lt;/code&gt;, then it should go like:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;a &lt;span class='o'&gt;[&lt;/span&gt; ate: &lt;span class='nv'&gt;6&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; 0 + 2 + 3 + 1 &lt;span class='o'&gt;]&lt;/span&gt;
+|--- ab &lt;span class='o'&gt;[&lt;/span&gt; ate: &lt;span class='nv'&gt;5&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; 0 + 2 + 3 &lt;span class='o'&gt;]&lt;/span&gt;
+      |--- abe &lt;span class='o'&gt;[&lt;/span&gt; ate: &lt;span class='nv'&gt;2&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; 0 + 2 &lt;span class='o'&gt;]&lt;/span&gt;
+      |--- abi &lt;span class='o'&gt;[&lt;/span&gt; ate: &lt;span class='nv'&gt;3&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; 0 + 3 &lt;span class='o'&gt;]&lt;/span&gt;
+|--- ac &lt;span class='o'&gt;[&lt;/span&gt; ate: &lt;span class='nv'&gt;1&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; 0 + 1 &lt;span class='o'&gt;]&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;So, previously we would have this big script in NodeJS that will batch all outgoing operations, and respectively update all nodes of the bank, this would be done from a single machine, called &lt;code&gt;Bank&lt;/code&gt;. All other machines would connect to it through a &lt;code&gt;BankClient&lt;/code&gt; — basically EventEmitter that talks to a &lt;code&gt;Bank&lt;/code&gt; service. In this architecture you cannot have two Bank machines, as you would’ve run into concurrency issues that way. There are transactions in Redis, but when you have to combine them together with business logic, it gets rather messy as you cannot simply rollback.&lt;/p&gt;
+
+&lt;p&gt;But most importantly of all, this is ultimately not scalable and you have to maintain a lot of synchronization code in NodeJS to interact with your bank’s persistence.&lt;/p&gt;
+
+&lt;h2 id=&quot;solution&quot;&gt;Solution&lt;/h2&gt;
+
+&lt;p&gt;An absolute win in this case is to incorporate all your logic into Redis. Think about it — you have one single threaded database that performs your business logic requests in an atomic way. And later on you can shard it, by the main key of each data structure being stored. It doesn’t really get any easier than this.&lt;/p&gt;
+
+&lt;p&gt;Basically, it’s not a database any longer, it is a persistence container, and you deploy your accounting business logic into it.&lt;/p&gt;
+
+&lt;h2 id=&quot;how&quot;&gt;How&lt;/h2&gt;
+
+&lt;p&gt;Now, how do you do this with Redis? By utilizing the &lt;code&gt;EVAL&lt;/code&gt; command — http://redis.io/commands/EVAL. It enables you to run Lua scripts inside your Redis instance.&lt;/p&gt;
+
+&lt;p&gt;Now, a lot of people might get sceptical once they hear Lua. Another language, another platform, all the burden of maintenance and testing issues.&lt;/p&gt;
+
+&lt;p&gt;What we aim to show here — is that all those are addressed in rather classical fashion, by unit-tests and integration tests, and you will find the approach of running Lua on top of Redis surprisingly pleasing.&lt;/p&gt;
+
+&lt;h2 id=&quot;getting_all_together&quot;&gt;Getting all together&lt;/h2&gt;
+
+&lt;p&gt;Let’s put it all together. We will try to address task stated in Why section of this article: a tree-like structure that propagates it changes to all the parent nodes.&lt;/p&gt;
+
+&lt;p&gt;First things first — you need to get Lua running locally on your machine in order to run Lua scripts as you are developing them.&lt;/p&gt;
+
+&lt;p&gt;I recommend you to install &lt;code&gt;luarocks&lt;/code&gt;, a Lua-packet manager (what &lt;code&gt;npm&lt;/code&gt; is to NodeJS, &lt;code&gt;cocoapods&lt;/code&gt; are to Objective C, &lt;code&gt;mvn&lt;/code&gt; to Java, &lt;code&gt;leiningen&lt;/code&gt; to Clojure). With &lt;code&gt;brew&lt;/code&gt; on Mac:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;brew install luarocks
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;One thing to keep in mind, is that together with Lua runtime you will require a bunch of auxiliary libraries that are installed in Redis, in order to be able to write good, full blown scripts.&lt;/p&gt;
+
+&lt;p&gt;A quick note on the data format we use in Redis. Since most of our data structures are rather complex and require a set parameters on different levels, we utilize JSON in our Redis values.&lt;/p&gt;
+
+&lt;p&gt;The only third party libraries, not native to Lua are &lt;code&gt;struct&lt;/code&gt;, &lt;code&gt;CJSON&lt;/code&gt; and &lt;code&gt;cmsgpack&lt;/code&gt;, as can be seen in &lt;a href=&quot;http://redis.io/commands/EVAL&quot;&gt;EVAL spec&lt;/a&gt;. With &lt;code&gt;luarocks&lt;/code&gt; it is a no-brainer:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;luarocks install lua-cjson
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Now we are good to write our first Lua script!&lt;/p&gt;
+
+&lt;h3 id=&quot;update_the_node_and_all_parent_nodes&quot;&gt;Update the node and all parent nodes&lt;/h3&gt;
+
+&lt;p&gt;In our sample task we will update the node and all it parent nodes. Nodes are keys in Redis that are composed of its parent names and its own name all dot separated.&lt;/p&gt;
+
+&lt;p&gt;So, if you have a node &lt;code&gt;a.b.c&lt;/code&gt; and you want to persist &lt;code&gt;{spent: 5}&lt;/code&gt; with the key &lt;code&gt;a.b.c&lt;/code&gt;, the &lt;code&gt;spent&lt;/code&gt; amount in both keys &lt;code&gt;a&lt;/code&gt; and &lt;code&gt;a.b&lt;/code&gt; should also go up.&lt;/p&gt;
+
+&lt;p&gt;The basic approach to it will be —&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;ARGV&lt;/span&gt; &lt;span class='o'&gt;~=&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+    &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;your script: there&lt;/span&gt;&lt;span class='se'&gt;\&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;s something fishy here, me not like this&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;KEYS&lt;/span&gt; &lt;span class='o'&gt;~=&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+    &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;your script: invalid inputs, one key at a time&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;spent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='nb'&gt;tonumber&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;ARGV&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+
+&lt;span class='c1'&gt;-- This node will give you parent node. Supposedly if there is a key &lt;/span&gt;
+&lt;span class='c1'&gt;-- nodeOne.nodeTwo.nodeTree, then nodeTwo is a direct parent of&lt;/span&gt;
+&lt;span class='c1'&gt;--  nodeThree; and nodeOne is an indirect parent to nodeThree&lt;/span&gt;
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;parent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;account&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='c1'&gt;-- searches from the end of the string instead&lt;/span&gt;
+    &lt;span class='c1'&gt;-- of the beginning, as string.find does&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;i&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;account&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;&lt;span class='n'&gt;match&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;^.*()%.&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;i&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+        &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='nb'&gt;string.sub&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;account&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='mi'&gt;0&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;i&lt;/span&gt; &lt;span class='o'&gt;-&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='kc'&gt;nil&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;spend&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='kc'&gt;nil&lt;/span&gt; &lt;span class='c1'&gt;-- in order to reference to itself in a recursive way&lt;/span&gt;
+&lt;span class='n'&gt;spend&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;amount&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;node&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;call&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;GET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='ow'&gt;not&lt;/span&gt; &lt;span class='n'&gt;node&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+        &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;your script: key &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt; doesnt exist&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;else&lt;/span&gt;
+        &lt;span class='c1'&gt;-- read it from Redis and decode&lt;/span&gt;
+        &lt;span class='n'&gt;node&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;decode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+
+    &lt;span class='c1'&gt;-- Nil check&lt;/span&gt;
+    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='ow'&gt;not&lt;/span&gt; &lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;spent&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+        &lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;spent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='mi'&gt;0&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+
+    &lt;span class='c1'&gt;-- recurse, first spend this amount on the parent nodes&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;parent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;parent&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;parent&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+        &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;spentByParent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;spend&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;parent&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;amount&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+
+    &lt;span class='c1'&gt;-- spend this amount on the child node&lt;/span&gt;
+    &lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;spent&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;spent&lt;/span&gt; &lt;span class='o'&gt;-&lt;/span&gt; &lt;span class='n'&gt;amount&lt;/span&gt;
+
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;nodeString&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;encode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;node&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;embeddedNodeString&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;encode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;nodeString&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='c1'&gt;-- escape inner quotes, adds surrounding quotes&lt;/span&gt;
+    &lt;span class='c1'&gt;-- parser friendly log&lt;/span&gt;
+    &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;log&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;LOG_NOTICE&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;spend.update: { &amp;quot;key&amp;quot;:&lt;/span&gt;&lt;span class='se'&gt;\&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;&amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='se'&gt;\&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;, &amp;quot;spent&amp;quot;:&amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;amount&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;, &amp;quot;value&amp;quot;:&amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;embeddedNodeString&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;}&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+    &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;call&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;SET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;nodeString&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;spend&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='c1'&gt;-- Since there are no arrays in Lua, only table, keep in mind that they are not 0-based, but 1&lt;/span&gt;
+&lt;span class='n'&gt;spend&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;KEYS&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;],&lt;/span&gt; &lt;span class='nb'&gt;tonumber&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;ARGV&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;]))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Save this file as &lt;code&gt;spend.lua&lt;/code&gt; file and let’s run this sweetness.&lt;/p&gt;
+
+&lt;h3 id=&quot;running_the_sweetness&quot;&gt;Running the sweetness&lt;/h3&gt;
+
+&lt;p&gt;We need to put in some initial values. Normally you would have a separate script to initialize them. For the purpose of this article this will do:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;redis-cli &lt;span class='nb'&gt;set &lt;/span&gt;a &lt;span class='s2'&gt;&amp;quot;{\&amp;quot;spent\&amp;quot;: 0}&amp;quot;&lt;/span&gt;
+&lt;span class='nv'&gt;$ &lt;/span&gt;redis-cli &lt;span class='nb'&gt;set &lt;/span&gt;a.b &lt;span class='s2'&gt;&amp;quot;{\&amp;quot;spent\&amp;quot;: 0}&amp;quot;&lt;/span&gt;
+&lt;span class='nv'&gt;$ &lt;/span&gt;redis-cli &lt;span class='nb'&gt;set &lt;/span&gt;a.b.c &lt;span class='s2'&gt;&amp;quot;{\&amp;quot;spent\&amp;quot;: 0}&amp;quot;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Sweet, now to run the script up-below on node &lt;code&gt;a.b.c&lt;/code&gt; with a value of &lt;code&gt;7&lt;/code&gt;:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;redis-cli evalsha &lt;span class='k'&gt;$(&lt;/span&gt;redis-cli script load &lt;span class='s2'&gt;&amp;quot;$(cat ./spend.lua)&amp;quot;&lt;/span&gt;&lt;span class='k'&gt;)&lt;/span&gt; 1 &lt;span class='s2'&gt;&amp;quot;a.b.c&amp;quot;&lt;/span&gt; 7
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;&lt;a href=&quot;http://www.youtube.com/watch?v=bYPqZlhpbQo&quot;&gt;Can you feel it&lt;/a&gt;? It just ran your Lua function in Redis. Note how we pass &lt;code&gt;1&lt;/code&gt; to our script before &lt;code&gt;&amp;quot;a.b.c&amp;quot;&lt;/code&gt;, it tells Redis how many arguments should be treated as keys and how many as a script arguments, those variables &lt;code&gt;KEYS&lt;/code&gt; and &lt;code&gt;ARGV&lt;/code&gt; respectively.&lt;/p&gt;
+
+&lt;h3 id=&quot;logs_and_the_situation&quot;&gt;Logs and the situation&lt;/h3&gt;
+
+&lt;p&gt;All logging from your scripts goes to the Redis log, therefore to see what is happening under the covers:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;tail -F /usr/local/var/log/redis.log
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Check your Redis config if not found — &lt;code&gt;redis-cli CONFIG GET logfile&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h3 id=&quot;transactions_and_exception_handling&quot;&gt;Transactions and exception handling&lt;/h3&gt;
+
+&lt;p&gt;Now, for the main part our script is good. Yet, there are some issues to it.&lt;/p&gt;
+
+&lt;p&gt;Say, what if &lt;code&gt;a.b&lt;/code&gt; is not initialized? Then, according to our implementation we will first increase &lt;code&gt;spent&lt;/code&gt; amount on key &lt;code&gt;a&lt;/code&gt;, but then we will fail with &lt;code&gt;your script: key a.b doesn't exist&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;That will bring our system in an inconsistent state — not cool. Overall we want either all in or all out.&lt;/p&gt;
+
+&lt;p&gt;Now there is a fairly simple thing you can do in order introduce transaction like behaviour:&lt;/p&gt;
+
+&lt;ol&gt;
+&lt;li&gt;Utilize &lt;code&gt;MSET&lt;/code&gt; as a single write operation. Since Redis is single threaded — you don’t have to worry about all those &lt;code&gt;GET&lt;/code&gt;s you have&lt;/li&gt;
+
+&lt;li&gt;Wrap the whole script with Lua’s &lt;code&gt;pcall&lt;/code&gt; — basically a &lt;code&gt;try ... catch&lt;/code&gt; block&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h4 id=&quot;_for_a_single_all_in_or_all_out&quot;&gt;&lt;code&gt;MSET&lt;/code&gt; for a single all in or all out&lt;/h4&gt;
+
+&lt;p&gt;You’ll need an utility function at the top of your script:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;_cache&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='p'&gt;{}&lt;/span&gt;
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;redisMSET&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='nb'&gt;table.insert&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='nb'&gt;table.insert&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;In code you would use these statements instead of all &lt;code&gt;SET&lt;/code&gt;s:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='n'&gt;redisMSET&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;SET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;a.b&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;{&amp;quot;spent&amp;quot;: 12}&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;And by the end of you script you would &lt;em&gt;commit&lt;/em&gt; it all at once with &lt;code&gt;MSET&lt;/code&gt;:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;call&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;MSET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nb'&gt;unpack&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;You can also go smart about it and do a wrapper around &lt;code&gt;GET&lt;/code&gt; that will first check your &lt;code&gt;_cache&lt;/code&gt; if it holds the desired key and if not — perform a call with &lt;code&gt;redis.call('GET'...&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h4 id=&quot;wrapping_into____block&quot;&gt;Wrapping into &lt;code&gt;try&lt;/code&gt; … &lt;code&gt;catch&lt;/code&gt; block&lt;/h4&gt;
+
+&lt;p&gt;There is no magic with this one — you wrap the whole thing in &lt;code&gt;pcall&lt;/code&gt; and you are done — it gives you &lt;code&gt;status&lt;/code&gt; variable, that tells you if it went fine or not and the result of executing that block of code.&lt;/p&gt;
+
+&lt;p&gt;The code will go like this —&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;main&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+    
+    &lt;span class='c1'&gt;-- Your code goes here and constructs some `result` object&lt;/span&gt;
+
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;result&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;status&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='nb'&gt;pcall&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;main&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;status&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+    &lt;span class='c1'&gt;-- `main&amp;#39; went fine: return `result`&lt;/span&gt;
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;
+&lt;span class='k'&gt;else&lt;/span&gt;
+    &lt;span class='c1'&gt;-- `main&amp;#39; raised an error: take appropriate actions&lt;/span&gt;
+    &lt;span class='c1'&gt;-- there is no redis.LOG_ERROR level&lt;/span&gt;
+    &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;log&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;LOG_WARNING&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;error: &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;error_reply&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;error: &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Combining it together with transactions:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;main&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;_cache&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='p'&gt;{}&lt;/span&gt;
+    &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;redisMSET&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='nb'&gt;table.insert&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;key&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='nb'&gt;table.insert&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;value&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+
+    &lt;span class='c1'&gt;-- your code goes here and constructs some `result` object&lt;/span&gt;
+
+    &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;call&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;MSET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nb'&gt;unpack&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;_cache&lt;/span&gt;&lt;span class='p'&gt;))&lt;/span&gt;
+
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;result&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;status&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='nb'&gt;pcall&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;main&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+
+&lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;status&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+    &lt;span class='c1'&gt;-- `main&amp;#39; went fine: return `result`&lt;/span&gt;
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;
+&lt;span class='k'&gt;else&lt;/span&gt;
+    &lt;span class='c1'&gt;-- `main&amp;#39; raised an error: take appropriate actions&lt;/span&gt;
+    &lt;span class='c1'&gt;-- there is no redis.LOG_ERROR level&lt;/span&gt;
+    &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;log&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;LOG_WARNING&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;error: &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;error_reply&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;error: &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;res&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Voilà!&lt;/p&gt;
+
+&lt;h3 id=&quot;unittesting_our_sweet_lua_awesomeness&quot;&gt;Unit-Testing our sweet Lua awesomeness&lt;/h3&gt;
+
+&lt;p&gt;Now all this is good, but here at Screen6 we do unit-testing, and just to be sure and because it is a good way to go about things.&lt;/p&gt;
+
+&lt;p&gt;There are two ways you can go about tests:&lt;/p&gt;
+
+&lt;ol&gt;
+&lt;li&gt;Test your Lua code with Lua unit tests&lt;/li&gt;
+
+&lt;li&gt;Test your Lua code on the application level. In our case — calling Lua script within Redis from CoffeeScript&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h3 id=&quot;unit_testing_with_busted&quot;&gt;Unit Testing with Busted&lt;/h3&gt;
+
+&lt;p&gt;We use &lt;a href=&quot;http://olivinelabs.com/busted/&quot;&gt;Busted&lt;/a&gt; framework to run unit tests on our Lua scripts. If you are familiar with &lt;a href=&quot;http://visionmedia.github.io/mocha/&quot;&gt;Mocha&lt;/a&gt;, you will feel at home right away.&lt;/p&gt;
+
+&lt;p&gt;Testing is rather straightforward, there is only one thing to note, that you would prefer to run tests “as if you are in Redis”, and therefore you would require some wrapper code to mock the API Redis provides you within Lua.&lt;/p&gt;
+
+&lt;p&gt;A very basic implementation that will enable you to use these operations:&lt;/p&gt;
+
+&lt;ol&gt;
+&lt;li&gt;redis.call( ‘SET’, … )&lt;/li&gt;
+
+&lt;li&gt;redis.call( ‘MSET’, … )&lt;/li&gt;
+
+&lt;li&gt;redis.call( ‘GET’, … )&lt;/li&gt;
+
+&lt;li&gt;redis.log( … )&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;Will look like this:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='lua'&gt;&lt;span class='n'&gt;cjson&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='nb'&gt;require&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;cjson&amp;quot;&lt;/span&gt;
+
+&lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;DATABASE&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='p'&gt;{}&lt;/span&gt;
+
+&lt;span class='k'&gt;function&lt;/span&gt; &lt;span class='nf'&gt;switch&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;t&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='n'&gt;t&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;case&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;self&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='kd'&gt;local&lt;/span&gt; &lt;span class='n'&gt;f&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;self&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='ow'&gt;or&lt;/span&gt; &lt;span class='n'&gt;self&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;default&lt;/span&gt;
+        &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;f&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+            &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='nb'&gt;type&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;f&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt; &lt;span class='o'&gt;==&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;function&amp;quot;&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+                &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;f&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;self&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+            &lt;span class='k'&gt;else&lt;/span&gt;
+                &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;case &amp;quot;&lt;/span&gt;&lt;span class='o'&gt;..&lt;/span&gt;&lt;span class='nb'&gt;tostring&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;&lt;span class='o'&gt;..&lt;/span&gt;&lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt; not a function&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+            &lt;span class='k'&gt;end&lt;/span&gt;
+        &lt;span class='k'&gt;end&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+      &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;t&lt;/span&gt;
+&lt;span class='k'&gt;end&lt;/span&gt;
+
+&lt;span class='n'&gt;redis&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='p'&gt;{&lt;/span&gt;
+    &lt;span class='n'&gt;call&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;operation&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='o'&gt;...&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='n'&gt;mockRedis&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;switch&lt;/span&gt; &lt;span class='p'&gt;{&lt;/span&gt;
+            &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;SET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt; &lt;span class='o'&gt;~=&lt;/span&gt; &lt;span class='mi'&gt;2&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+                        &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;invalid amount of argumetns passed on to mockRedis.set&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;else&lt;/span&gt;
+                        &lt;span class='n'&gt;DATABASE&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;]]&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;decode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;2&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+                    &lt;span class='k'&gt;end&lt;/span&gt;
+                &lt;span class='k'&gt;end&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+            &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;MSET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt; &lt;span class='o'&gt;%&lt;/span&gt; &lt;span class='mi'&gt;2&lt;/span&gt; &lt;span class='o'&gt;~=&lt;/span&gt; &lt;span class='mi'&gt;0&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+                        &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;invalid amount or arguments (not even) passed on to the mockRedis.mset&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;else&lt;/span&gt;
+                        &lt;span class='k'&gt;for&lt;/span&gt; &lt;span class='n'&gt;i&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='mi'&gt;2&lt;/span&gt; &lt;span class='k'&gt;do&lt;/span&gt;
+                            &lt;span class='n'&gt;DATABASE&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;i&lt;/span&gt;&lt;span class='p'&gt;]]&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;decode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;i&lt;/span&gt; &lt;span class='o'&gt;+&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;])&lt;/span&gt;
+                        &lt;span class='k'&gt;end&lt;/span&gt;
+                    &lt;span class='k'&gt;end&lt;/span&gt;
+                &lt;span class='k'&gt;end&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+            &lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;GET&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='o'&gt;#&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt; &lt;span class='o'&gt;~=&lt;/span&gt; &lt;span class='mi'&gt;1&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+                        &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;invalid amount of arguments passed on to mockRedis.get&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='k'&gt;else&lt;/span&gt;
+                        &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='n'&gt;DATABASE&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;]]&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt;
+                            &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;cjson&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='n'&gt;encode&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;DATABASE&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='n'&gt;arg&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;]])&lt;/span&gt;
+                        &lt;span class='k'&gt;else&lt;/span&gt;
+                            &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='kc'&gt;nil&lt;/span&gt;
+                        &lt;span class='k'&gt;end&lt;/span&gt;
+                    &lt;span class='k'&gt;end&lt;/span&gt;
+                &lt;span class='k'&gt;end&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+            &lt;span class='n'&gt;default&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;x&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                    &lt;span class='nb'&gt;error&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt;unsupported method &amp;#39;&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='n'&gt;operation&lt;/span&gt; &lt;span class='o'&gt;..&lt;/span&gt; &lt;span class='s1'&gt;&amp;#39;&lt;/span&gt;&lt;span class='s'&gt; called on mockRedis&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+                &lt;span class='k'&gt;end&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+        &lt;span class='p'&gt;}&lt;/span&gt;
+        &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='n'&gt;mockRedis&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;&lt;span class='n'&gt;case&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;operation&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+
+    &lt;span class='n'&gt;LOG_DEBUG&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;DEBUG&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='n'&gt;LOG_VERBOSE&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;VERBOSE&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='n'&gt;LOG_NOTICE&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;NOTICE&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='n'&gt;LOG_WARNING&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;&lt;/span&gt;&lt;span class='s'&gt;LOG_WARNING&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+
+    &lt;span class='n'&gt;log&lt;/span&gt; &lt;span class='o'&gt;=&lt;/span&gt; &lt;span class='k'&gt;function&lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='n'&gt;level&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='n'&gt;message&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='c1'&gt;--print(level .. &amp;quot;# &amp;quot; .. message)&lt;/span&gt;
+    &lt;span class='k'&gt;end&lt;/span&gt;
+&lt;span class='p'&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;It might be just slightly overwhelming if you are not that much into Lua, although — it’s pretty basic, once you get your head around it, it won’t be a biggy to extend it further, to suit your needs.&lt;/p&gt;
+
+&lt;h3 id=&quot;integration_test_spawning_redis_process_from_nodejs_to_execute_lua_in_it&quot;&gt;Integration test: Spawning Redis process from Node.JS to execute Lua in it&lt;/h3&gt;
+
+&lt;p&gt;Now, for the simplicity sake of this article I will drop the part about doing integration test through a real instance of Redis.&lt;/p&gt;
+
+&lt;p&gt;In short we wrote a wrapper that launches Redis from Node.JS while you are running your Mocha tests in &lt;code&gt;before&lt;/code&gt; and &lt;code&gt;after&lt;/code&gt; blocks, something like this —&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='coffeescript'&gt;&lt;span class='nv'&gt;RedisServer = &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;require&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;./redis_spawn&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;).&lt;/span&gt;&lt;span class='nx'&gt;RedisServer&lt;/span&gt;
+&lt;span class='nv'&gt;redisServerOpts =&lt;/span&gt;
+    &lt;span class='nv'&gt;workingDirectory: &lt;/span&gt;&lt;span class='nx'&gt;RedisServer&lt;/span&gt;&lt;span class='o'&gt;::&lt;/span&gt;&lt;span class='nx'&gt;optionsDefault&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;workingDirectory&lt;/span&gt;
+    &lt;span class='nv'&gt;save: &lt;/span&gt;&lt;span class='kc'&gt;true&lt;/span&gt;
+    &lt;span class='nv'&gt;timeout: &lt;/span&gt;&lt;span class='mi'&gt;2000&lt;/span&gt;
+&lt;span class='nv'&gt;redisServer = &lt;/span&gt;&lt;span class='k'&gt;new&lt;/span&gt; &lt;span class='nx'&gt;redisSpawn&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;RedisServer&lt;/span&gt; &lt;span class='nx'&gt;redisServerOpts&lt;/span&gt;
+
+&lt;span class='p'&gt;...&lt;/span&gt;
+
+    &lt;span class='nx'&gt;before&lt;/span&gt; &lt;span class='nf'&gt;(done) -&amp;gt;&lt;/span&gt;
+        &lt;span class='nx'&gt;redisServer&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;start&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='nf'&gt;-&amp;gt;&lt;/span&gt;
+            &lt;span class='nv'&gt;redisClient = &lt;/span&gt;&lt;span class='nx'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;createClient&lt;/span&gt; &lt;span class='nx'&gt;redisServerOpts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;config&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;port&lt;/span&gt;
+            &lt;span class='nx'&gt;redisClient&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;once&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;connect&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='nf'&gt;-&amp;gt;&lt;/span&gt;
+                &lt;span class='nx'&gt;redisClient&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;flushall&lt;/span&gt; &lt;span class='nx'&gt;done&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;And then interacts with the Lua script that is running on the recently spawned Redis instance. Might there be any interest in it — we’ll put up a separate article on the topic. Don’t hesitate to reach out to us!&lt;/p&gt;
+
+&lt;h2 id=&quot;in_production&quot;&gt;In Production&lt;/h2&gt;
+
+&lt;h3 id=&quot;installing_lua_script_upon_application_start&quot;&gt;Installing Lua script upon application start&lt;/h3&gt;
+
+&lt;p&gt;Now that you have your Lua scripts thoroughly tested it is time to run them in production. The basic idea is to load them once on application startup and keep the resulting &lt;code&gt;SHA&lt;/code&gt;, so that you won’t have to send the script there and back each and every time upon request.&lt;/p&gt;
+
+&lt;p&gt;Instead of thousand of words, the CoffeeScript snippet that will do just that —&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='coffeescript'&gt;&lt;span class='nv'&gt;redis = &lt;/span&gt;&lt;span class='nx'&gt;require&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;redis&amp;#39;&lt;/span&gt;
+
+&lt;span class='nv'&gt;module.exports.YourDbClient =&lt;/span&gt;
+&lt;span class='k'&gt;class&lt;/span&gt; &lt;span class='nx'&gt;RdbClient&lt;/span&gt; &lt;span class='k'&gt;extends&lt;/span&gt; &lt;span class='nx'&gt;EventEmitter&lt;/span&gt;
+    &lt;span class='nv'&gt;constructor: &lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='nf'&gt;-&amp;gt;&lt;/span&gt;
+        &lt;span class='vi'&gt;@scripts = &lt;/span&gt;&lt;span class='p'&gt;{&lt;/span&gt;
+            &lt;span class='nv'&gt;someScript1:&lt;/span&gt;
+                &lt;span class='nv'&gt;text: &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;fs&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;readFileSync&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;path&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;join&lt;/span&gt; &lt;span class='nx'&gt;__dirname&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;someScript1.lua&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)).&lt;/span&gt;&lt;span class='nx'&gt;toString&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+            &lt;span class='nv'&gt;someScript2:&lt;/span&gt;
+                &lt;span class='nv'&gt;text: &lt;/span&gt;&lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;fs&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;readFileSync&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;path&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;join&lt;/span&gt; &lt;span class='nx'&gt;__dirname&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;someScript2.lua&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;)).&lt;/span&gt;&lt;span class='nx'&gt;toString&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+                &lt;span class='nv'&gt;sha1: &lt;/span&gt;&lt;span class='kc'&gt;null&lt;/span&gt;
+        &lt;span class='p'&gt;}&lt;/span&gt;
+        &lt;span class='nv'&gt;script.name = &lt;/span&gt;&lt;span class='nx'&gt;name&lt;/span&gt; &lt;span class='k'&gt;for&lt;/span&gt; &lt;span class='nx'&gt;name&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nx'&gt;script&lt;/span&gt; &lt;span class='k'&gt;of&lt;/span&gt; &lt;span class='nx'&gt;@scripts&lt;/span&gt;      &lt;span class='c1'&gt;# copy name -&amp;gt; .name&lt;/span&gt;
+        &lt;span class='nx'&gt;@connect&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+
+    &lt;span class='nv'&gt;connect: &lt;/span&gt;&lt;span class='nf'&gt;(cb) -&amp;gt;&lt;/span&gt;
+        &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='nx'&gt;@rdb&lt;/span&gt; &lt;span class='k'&gt;then&lt;/span&gt; &lt;span class='k'&gt;return&lt;/span&gt; &lt;span class='nx'&gt;cb&lt;/span&gt;&lt;span class='o'&gt;?&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+
+        &lt;span class='vi'&gt;@rdb = &lt;/span&gt;&lt;span class='nx'&gt;redis&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;createClient&lt;/span&gt; &lt;span class='o'&gt;&amp;lt;&lt;/span&gt;&lt;span class='nx'&gt;redisPort&lt;/span&gt;&lt;span class='o'&gt;&amp;gt;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='o'&gt;&amp;lt;&lt;/span&gt;&lt;span class='nx'&gt;redisHost&lt;/span&gt;&lt;span class='o'&gt;&amp;gt;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='o'&gt;&amp;lt;&lt;/span&gt;&lt;span class='nx'&gt;redisOpts&lt;/span&gt;&lt;span class='o'&gt;&amp;gt;&lt;/span&gt;
+
+        &lt;span class='nv'&gt;loadScripts = &lt;/span&gt;&lt;span class='nf'&gt;(cb) =&amp;gt;&lt;/span&gt;
+            &lt;span class='nv'&gt;loader = &lt;/span&gt;&lt;span class='nx'&gt;@rdb&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;multi&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+            &lt;span class='nx'&gt;loader&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;script&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;load&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nx'&gt;@scripts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;someScript1&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;text&lt;/span&gt;
+            &lt;span class='nx'&gt;loader&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;script&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;load&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nx'&gt;@scripts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;someScript2&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;text&lt;/span&gt;
+            &lt;span class='nx'&gt;loader&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nb'&gt;eval&lt;/span&gt; &lt;span class='nx'&gt;@scripts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;configure&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;text&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='mi'&gt;0&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;JSON&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;stringify&lt;/span&gt; &lt;span class='p'&gt;{&lt;/span&gt; &lt;span class='nv'&gt;clients: &lt;/span&gt;&lt;span class='nx'&gt;@config&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;bidder&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;clients&lt;/span&gt; &lt;span class='p'&gt;}),&lt;/span&gt; &lt;span class='nb'&gt;Date&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;now&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+            &lt;span class='nx'&gt;loader&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;script&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;load&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='nx'&gt;@scripts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;spend&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;text&lt;/span&gt;
+            &lt;span class='nx'&gt;loader&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;exec&lt;/span&gt; &lt;span class='nf'&gt;(err, results) =&amp;gt;&lt;/span&gt;
+                &lt;span class='k'&gt;if&lt;/span&gt; &lt;span class='nx'&gt;err&lt;/span&gt;
+                    &lt;span class='nx'&gt;cb&lt;/span&gt;&lt;span class='o'&gt;?&lt;/span&gt; &lt;span class='nx'&gt;err&lt;/span&gt;
+                    &lt;span class='k'&gt;throw&lt;/span&gt; &lt;span class='nx'&gt;err&lt;/span&gt;
+                &lt;span class='vi'&gt;@scripts.someScript1.sha1 = &lt;/span&gt;&lt;span class='nx'&gt;results&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;0&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+                &lt;span class='vi'&gt;@scripts.someScript2.sha1 = &lt;/span&gt;&lt;span class='nx'&gt;results&lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='mi'&gt;1&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+                &lt;span class='nx'&gt;cb&lt;/span&gt;&lt;span class='o'&gt;?&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+
+        &lt;span class='nx'&gt;@rdb&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;on&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;connect&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt;
+            &lt;span class='nx'&gt;loadScripts&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='nx'&gt;@emit&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;connected&amp;#39;&lt;/span&gt;
+        &lt;span class='nx'&gt;@rdb&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;on&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;reconnect&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt;
+            &lt;span class='nx'&gt;loadScripts&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='nx'&gt;@emit&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;reconnected&amp;#39;&lt;/span&gt;
+        &lt;span class='nx'&gt;@rdb&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;once&lt;/span&gt; &lt;span class='s'&gt;&amp;#39;end&amp;#39;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;()&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt;
+            &lt;span class='vi'&gt;@rdb = &lt;/span&gt;&lt;span class='kc'&gt;null&lt;/span&gt;
+
+    &lt;span class='nv'&gt;actionWithRedis: &lt;/span&gt;&lt;span class='nf'&gt;(args...) -&amp;gt;&lt;/span&gt;
+        &lt;span class='nx'&gt;@txn&lt;/span&gt; &lt;span class='o'&gt;?=&lt;/span&gt; &lt;span class='nx'&gt;@rdb&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;multi&lt;/span&gt;&lt;span class='p'&gt;()&lt;/span&gt;
+        &lt;span class='vi'&gt;@operation = &lt;/span&gt;&lt;span class='p'&gt;[&lt;/span&gt;&lt;span class='nx'&gt;@client&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;scripts&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;spend&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;sha1&lt;/span&gt;&lt;span class='p'&gt;]&lt;/span&gt;
+        &lt;span class='nx'&gt;@txn&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;evalsha&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;apply&lt;/span&gt; &lt;span class='nx'&gt;@txn&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt; &lt;span class='p'&gt;(&lt;/span&gt;&lt;span class='nx'&gt;@operation&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;concat&lt;/span&gt; &lt;span class='nx'&gt;args&lt;/span&gt;&lt;span class='p'&gt;)&lt;/span&gt;
+        &lt;span class='nx'&gt;@txn&lt;/span&gt;&lt;span class='p'&gt;.&lt;/span&gt;&lt;span class='nx'&gt;exec&lt;/span&gt; &lt;span class='nf'&gt;(err, results) =&amp;gt;&lt;/span&gt;
+            &lt;span class='c1'&gt;# further sweetness&lt;/span&gt;
+            &lt;span class='p'&gt;...&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h3 id=&quot;puppet_configuration_for_jenkins&quot;&gt;Puppet configuration for Jenkins&lt;/h3&gt;
+
+&lt;p&gt;We utilize Jenkins with JUnit test result reports, Busted works with it just fine with XUnit reporting engine —&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='bash'&gt;&lt;span class='nv'&gt;$ &lt;/span&gt;busted -o junit ./test
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;And here are the small bits of puppet configuration to enable your Jenkins with Lua, Busted and the necessary libs:&lt;/p&gt;
+&lt;div class='highlight'&gt;&lt;pre&gt;&lt;code class='ruby'&gt;&lt;span class='k'&gt;class&lt;/span&gt; &lt;span class='ss'&gt;genericpackages&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;&lt;span class='ss'&gt;:lua&lt;/span&gt; &lt;span class='p'&gt;{&lt;/span&gt;
+    &lt;span class='n'&gt;package&lt;/span&gt; &lt;span class='p'&gt;{&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;luarocks&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;
+        &lt;span class='k'&gt;ensure&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='n'&gt;installed&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='p'&gt;}&lt;/span&gt;
+    &lt;span class='nb'&gt;exec&lt;/span&gt;&lt;span class='p'&gt;{&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;install busted&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;
+        &lt;span class='n'&gt;command&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;luarocks install busted&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+        &lt;span class='nb'&gt;require&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='no'&gt;Package&lt;/span&gt;&lt;span class='o'&gt;[&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;luarocks&amp;#39;&lt;/span&gt;&lt;span class='o'&gt;]&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='p'&gt;}&lt;/span&gt;
+    &lt;span class='nb'&gt;exec&lt;/span&gt;&lt;span class='p'&gt;{&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;install cjson redis library&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;:&lt;/span&gt;
+        &lt;span class='n'&gt;command&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='s2'&gt;&amp;quot;luarocks install lua-cjson&amp;quot;&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+        &lt;span class='nb'&gt;require&lt;/span&gt; &lt;span class='o'&gt;=&amp;gt;&lt;/span&gt; &lt;span class='no'&gt;Package&lt;/span&gt;&lt;span class='o'&gt;[&lt;/span&gt;&lt;span class='s1'&gt;&amp;#39;luarocks&amp;#39;&lt;/span&gt;&lt;span class='o'&gt;]&lt;/span&gt;&lt;span class='p'&gt;,&lt;/span&gt;
+    &lt;span class='p'&gt;}&lt;/span&gt;
+&lt;span class='p'&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&quot;summary&quot;&gt;Summary&lt;/h2&gt;
+
+&lt;p&gt;Four months into the game — works as a charm, easy to monitor. We are very happy with transition of our accounting logic into Lua scripts executed directly in the Redis.&lt;/p&gt;
+
+&lt;h2 id=&quot;links&quot;&gt;Links&lt;/h2&gt;
+
+&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;http://www.lua.org/&quot;&gt;Lua Main Page&lt;/a&gt;&lt;/li&gt;
+
+&lt;li&gt;&lt;a href=&quot;http://github.com/keplerproject/luarocks&quot;&gt;LuaRocks&lt;/a&gt;&lt;/li&gt;
+
+&lt;li&gt;&lt;a href=&quot;http://luarocks.org/en/Installation_instructions_for_Mac_OS_X&quot;&gt;Installing Lua Rocks on Mac&lt;/a&gt;&lt;/li&gt;
+
+&lt;li&gt;&lt;a href=&quot;http://www.redisgreen.net/blog/intro-to-lua-for-redis-programmers/&quot;&gt;Intro to Lua for Redis programmers&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;&lt;em&gt;[Originally published in &lt;a href=&quot;http://screen6.github.io/blog/2014/09/18/lua-scripts-in-redis-within-nodejs.html&quot;&gt;Screen6 Technical Blog&lt;/a&gt; on 09/18/2014]&lt;/em&gt;&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
    <title>HyperLogLog with Cascalog</title>
-   <link href="http://example.com/blog/2013/11/14/hyperloglog-with-cascalog.html"/>
+   <link href="http://ilyapimenov.com/blog/2013/11/14/hyperloglog-with-cascalog.html"/>
    <updated>2013-11-14T00:00:00+01:00</updated>
-   <id>http://example.com/blog/2013/11/14/hyperloglog-with-cascalog</id>
+   <id>http://ilyapimenov.com/blog/2013/11/14/hyperloglog-with-cascalog</id>
    <content type="html">
 &lt;p&gt;&lt;em&gt;Updated: 22 nov 2013&lt;/em&gt;&lt;/p&gt;
 
