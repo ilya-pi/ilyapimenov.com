@@ -168,7 +168,7 @@ $ sudo passwd alfred
 
 # Step 5: Verification
 
-From your local machine fire this to see it in action:
+From your local machine fire this to see it in action — 
 
 {% highlight bash %}
 $ ftp ftp://alfred:alfred@130.211.89.90

@@ -4,13 +4,170 @@
  <title>The blog of Ilya Pimenov</title>
  <link href="http://ilyapimenov.com/atom.xml" rel="self"/>
  <link href="http://ilyapimenov.com"/>
- <updated>2014-11-12T17:06:08+01:00</updated>
+ <updated>2015-01-19T09:54:46+01:00</updated>
  <id>http://ilyapimenov.com</id>
  <author>
    <name>Ilya Pimenov</name>
    <email>ilya.pimenov@gmail.com</email>
  </author>
 
+ 
+ <entry>
+   <title>FTP Proxy to Google Cloud Storage</title>
+   <link href="http://ilyapimenov.com/blog/2015/01/19/ftp-proxy-to-gcs.html"/>
+   <updated>2015-01-19T00:00:00+01:00</updated>
+   <id>http://ilyapimenov.com/blog/2015/01/19/ftp-proxy-to-gcs</id>
+   <content type="html">&lt;h1 id=&quot;introduction&quot;&gt;Introduction&lt;/h1&gt;
+
+&lt;p&gt;After reading this article you will be able to setup an FTP server on a Google Cloud Compute instance, that uploads/downloads content directly to/from Google Cloud Storage. For EC2 backed with S3 refer to [1].&lt;/p&gt;
+
+&lt;h1 id=&quot;step1-setting-up-google-cloud-engine-instance&quot;&gt;Step1: Setting up Google Cloud Engine instance&lt;/h1&gt;
+
+&lt;p&gt;To setup an instance, install &lt;code&gt;gcloud&lt;/code&gt;, Google Cloud command-line util following these &lt;a href=&quot;https://cloud.google.com/sdk/&quot;&gt;instructions&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Then fire up the console and do the following:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;gcloud compute instances create ftp-proxy --image ubuntu-1404-trusty-v20141212 --image-project ubuntu-os-cloud --zone europe-west1-b --machine-type n1-standard-1 --tags ftp-proxy ftpproxy&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;This will fire up a machine called &lt;code&gt;ftp-proxy&lt;/code&gt; on your Google Cloud Engine account in zone &lt;code&gt;europe-west1-b&lt;/code&gt; (change to the one desired).&lt;/p&gt;
+
+&lt;div class=&quot;note&quot;&gt;Looking ahead, It is important to go for ubuntu-1404 image. With earlier versions of ubuntu you wont be able to install gcsfs, due to missing libboost-regex1.49.0 and libboost-thread1.49.0 libraries, while ubuntu-1210 is out of support. &lt;br /&gt;&lt;br /&gt;With debian you will have issues configuring vsftpd service that enables ftp access to your server: you won&#39;t be able to restrict users to their home directories (&lt;a href=&quot;https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=735191#10&quot;&gt;bug-735191&lt;/a&gt;).&lt;/div&gt;
+
+&lt;p&gt;Now in order to ssh into this machine:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;gcloud compute ssh ftp-proxy --zone europe-west1-b&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Handy, eh?&lt;/p&gt;
+
+&lt;h1 id=&quot;step-2-mounting-google-cloud-storage-onto-the-instance&quot;&gt;Step 2: Mounting Google Cloud Storage onto the instance&lt;/h1&gt;
+
+&lt;p&gt;We’ll require a thirdparty tool in order to mount Google Cloud Storage to our instance, in particular — &lt;a href=&quot;https://code.google.com/p/gcsfs/&quot;&gt;gcsfs&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Get the proper download link from their website, you will need this one — &lt;code&gt;gcsfs_0.15-1_amd64.deb&lt;/code&gt;, and then:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;wget https://drive.google.com/uc?id&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;0B071t7_clY1HdG8zUTc5TGszU0E&lt;span class=&quot;p&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;export&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;download
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;mv uc&lt;span class=&quot;se&quot;&gt;\?&lt;/span&gt;id&lt;span class=&quot;se&quot;&gt;\=&lt;/span&gt;0B071t7_clY1HdG8zUTc5TGszU0E gcsfs_0.15-1_amd64.deb&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Install the package itself:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo dpkg -i gcsfs_0.15-1_amd64.deb&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Next update the dependencies and work out through the missing libraries (slightly dirty approach, hopefully won’t be needed in  the upcoming future):&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo apt-get update
+
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;wget http://launchpadlibrarian.net/141626883/libboost-regex1.49.0_1.49.0-4_amd64.deb
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo dpkg -i libboost-regex1.49.0_1.49.0-4_amd64.deb
+
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;wget http://launchpadlibrarian.net/141626895/libboost-thread1.49.0_1.49.0-4_amd64.deb
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo dpkg -i libboost-thread1.49.0_1.49.0-4_amd64.deb
+
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;wget http://launchpadlibrarian.net/153428081/libicu48_4.8.1.1-12ubuntu2_amd64.deb
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo dpkg -i libicu48_4.8.1.1-12ubuntu2_amd64.deb
+
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo apt-get install -f&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Check that everything is fine:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;gcsfs -V
+
+&amp;gt;gcsfs, 0.15 &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;r792M&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;, FUSE driver &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; cloud object storage services
+&amp;gt;enabled services: aws, fvs, google-storage&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Let’s authenticate it with Google Cloud Storage:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo gcsfs_gs_get_token /etc/gcsfs_token
+
+&amp;gt; Paste this URL into your browser:
+&amp;gt;https://accounts.google.com/o/oauth2/auth?client_id&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;xxxxxxxxxxxx.apps.googleusercontent.com&lt;span class=&quot;p&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;redirect_uri&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;urn%3aietf%3awg%3aoauth%3a2.0%3aoob&lt;span class=&quot;p&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;scope&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;https%3a%2f%2fwww.googleapis.com%2fauth%2fdevstorage.read_write&lt;span class=&quot;p&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;response_type&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;code
+&amp;gt;
+&amp;gt;Please enter the authorization code:
+&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;Important:&lt;/strong&gt; In the string taht is given to authorize against google cloud (the “Paste this URL into your browser” link) find the text &lt;code&gt;read_write&lt;/code&gt; and replace it with &lt;code&gt;full_control&lt;/code&gt;. Otherwise listing in the folders won’t work and it is very likely you will have random transient I/O Errors.&lt;/p&gt;
+
+&lt;p&gt;Create gcsfs configuration file &lt;code&gt;/etc/gcsfs_config&lt;/code&gt; and paste in:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;service&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;google-storage
+&lt;span class=&quot;c&quot;&gt;# Your bucket on Google Cloud Storage, i.e. `xyz-ftp-bucket`&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;bucket_name&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&amp;lt;Bucket-Name&amp;gt;
+&lt;span class=&quot;nv&quot;&gt;gs_token_file&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;/etc/gcsfs_token&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Create mount point and mount the cloud storage:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;mkdir /mnt/ftp
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo gcsfs -o &lt;span class=&quot;nv&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;/etc/gcsfs_config -o allow_other /mnt/ftp&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h1 id=&quot;step-3-setup-ftp-daemon-vsftpd&quot;&gt;Step 3: Setup FTP daemon &lt;code&gt;vsftpd&lt;/code&gt;&lt;/h1&gt;
+
+&lt;p&gt;Add the new repository and install with &lt;code&gt;apt-get&lt;/code&gt;:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo add-apt-repository ppa:thefrontiergroup/vsftpd
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo apt-get -y install vsftpd&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Configure it — &lt;code&gt;sudo nano /etc/vsftpd.conf&lt;/code&gt;, here are the properties you want to set to &lt;code&gt;YES&lt;/code&gt; in order for each user to have his isolated “directory” on your ftp, without being able to mess up with others:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;c&quot;&gt;# You may restrict local users to their home directories.  See the FAQ for&lt;/span&gt;
+&lt;span class=&quot;c&quot;&gt;# the possible risks in this before using chroot_local_user or&lt;/span&gt;
+&lt;span class=&quot;c&quot;&gt;# chroot_list_enable below.&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;chroot_local_user&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;YES
+&lt;span class=&quot;c&quot;&gt;# Keep non-chroot listed users jailed&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;allow_writeable_chroot&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;YES&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Add passive support to your configuration:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;c&quot;&gt;# Passive support&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;pasv_enable&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;yes
+&lt;span class=&quot;nv&quot;&gt;pasv_min_port&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;m&quot;&gt;15393&lt;/span&gt; &lt;span class=&quot;c&quot;&gt;# The start port range configured in the security group&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;pasv_max_port&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;m&quot;&gt;15592&lt;/span&gt; &lt;span class=&quot;c&quot;&gt;# The end port range configured int he security group&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;pasv_address&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;xxx.xxx.xxx.xxx &lt;span class=&quot;c&quot;&gt;# the public IP address of the FTP serv&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;If later on encountered &lt;a href=&quot;http://askubuntu.com/questions/413677/vsftpd-530-login-incorrect&quot;&gt;530 Login incorrect&lt;/a&gt;, rename the pam service to:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;pam_service_name&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;ftp&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;All done, restart the service:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo service vsftpd restart&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h1 id=&quot;step-4-creating-new-users&quot;&gt;Step 4: Creating new users&lt;/h1&gt;
+
+&lt;p&gt;Now in order to create a new user &lt;code&gt;alfred&lt;/code&gt; with home directory &lt;code&gt;/mnt/ftp/alfred&lt;/code&gt;, which will be persisted under &lt;code&gt;gs://&amp;lt;Bucket-Name&amp;gt;/alfred&lt;/code&gt; on Google Cloud Storage, ssh into the machine:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;gcloud compute ssh ftp-proxy --zone europe-west1-b&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;And create the user himself:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo useradd -d /mnt/ftp/alfred -s /sbin/nologin alfred
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo mkdir /mnt/ftp/alfred
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo chown alfred /mnt/ftp/alfred
+&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;sudo passwd alfred
+&amp;gt; New password:&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h1 id=&quot;step-5-verification&quot;&gt;Step 5: Verification&lt;/h1&gt;
+
+&lt;p&gt;From your local machine fire this to see it in action:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;ftp ftp://alfred:alfred@130.211.89.90
+&amp;gt;put ./&amp;lt;Some-local-file&amp;gt; &amp;lt;File-name-to-put-as-on-Ftp&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;And look at your Google Cloud Storage now:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;gsutil ls gs://&amp;lt;Bucket-Name&amp;gt;/alfred/
+&amp;gt; gs://&amp;lt;Bucket-Name&amp;gt;/alfred/
+&amp;gt; gs://&amp;lt;Bucket-Name&amp;gt;/alfred/&amp;lt;File-name-to-put-as-on-Ftp&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Yay! You are all set now.&lt;/p&gt;
+
+&lt;h1 id=&quot;links&quot;&gt;Links&lt;/h1&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;a href=&quot;https://cloud.google.com/&quot;&gt;Google Cloud Platform&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://cloud.google.com/hadoop/google-cloud-storage-connector&quot;&gt;Google cloud storage connector&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://www.codeproject.com/Tips/546903/Amazon-AWS-EC-FTP-server-using-S-as-the-backend&quot;&gt;Amazon AWS: EC2 FTP server using S3 as the backend&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+</content>
+ </entry>
  
  <entry>
    <title>Unzip files on S3, concatenate, gzip and put on Google Cloud Storage</title>
