@@ -4,7 +4,7 @@
  <title>The blog of Ilya Pimenov</title>
  <link href="http://ilyapimenov.com/atom.xml" rel="self"/>
  <link href="http://ilyapimenov.com"/>
- <updated>2015-01-19T09:54:46+01:00</updated>
+ <updated>2015-01-22T13:48:40+01:00</updated>
  <id>http://ilyapimenov.com</id>
  <author>
    <name>Ilya Pimenov</name>
@@ -146,9 +146,9 @@
 
 &lt;h1 id=&quot;step-5-verification&quot;&gt;Step 5: Verification&lt;/h1&gt;
 
-&lt;p&gt;From your local machine fire this to see it in action:&lt;/p&gt;
+&lt;p&gt;From your local machine fire this to see it in action — &lt;/p&gt;
 
-&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;ftp ftp://alfred:alfred@130.211.89.90
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;ftp ftp://alfred:alfred@xxx.xxx.xxx.xxx
 &amp;gt;put ./&amp;lt;Some-local-file&amp;gt; &amp;lt;File-name-to-put-as-on-Ftp&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
 &lt;p&gt;And look at your Google Cloud Storage now:&lt;/p&gt;
