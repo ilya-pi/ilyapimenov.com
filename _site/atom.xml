@@ -4,7 +4,7 @@
  <title>The blog of Ilya Pimenov</title>
  <link href="http://ilyapimenov.com/atom.xml" rel="self"/>
  <link href="http://ilyapimenov.com"/>
- <updated>2015-01-22T13:48:40+01:00</updated>
+ <updated>2015-09-07T17:26:00+02:00</updated>
  <id>http://ilyapimenov.com</id>
  <author>
    <name>Ilya Pimenov</name>
@@ -146,7 +146,7 @@
 
 &lt;h1 id=&quot;step-5-verification&quot;&gt;Step 5: Verification&lt;/h1&gt;
 
-&lt;p&gt;From your local machine fire this to see it in action — &lt;/p&gt;
+&lt;p&gt;From your local machine fire this to see it in action —&lt;/p&gt;
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;ftp ftp://alfred:alfred@xxx.xxx.xxx.xxx
 &amp;gt;put ./&amp;lt;Some-local-file&amp;gt; &amp;lt;File-name-to-put-as-on-Ftp&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
@@ -178,7 +178,7 @@
 
 &lt;p&gt;What happens — we have these huge zipped log files for analysis in our &lt;a href=&quot;http://aws.amazon.com/s3‎&quot;&gt;Amazon S3&lt;/a&gt; bucket on Amazon and we wanted to try processing them on &lt;a href=&quot;https://cloud.google.com/bigquery&quot;&gt;Google Big Query&lt;/a&gt;, which supports only gzip as a matter of compression.&lt;/p&gt;
 
-&lt;p&gt;Overall — zip is a bad format when it comes to big data, the following &lt;a href=&quot;https://issues.apache.org/jira/browse/MAPREDUCE-210&quot;&gt;issue&lt;/a&gt; — &lt;em&gt;“want InputFormat for zip files”&lt;/em&gt; been in progress with &lt;em&gt;major&lt;/em&gt; priority for the past &lt;strong&gt;7 years&lt;/strong&gt;. &lt;/p&gt;
+&lt;p&gt;Overall — zip is a bad format when it comes to big data, the following &lt;a href=&quot;https://issues.apache.org/jira/browse/MAPREDUCE-210&quot;&gt;issue&lt;/a&gt; — &lt;em&gt;“want InputFormat for zip files”&lt;/em&gt; been in progress with &lt;em&gt;major&lt;/em&gt; priority for the past &lt;strong&gt;7 years&lt;/strong&gt;.&lt;/p&gt;
 
 &lt;p&gt;Cascading had a support for ZIP sometime back, but it was removed in later releases. Please reference the issue thread for reasoning on the topic.&lt;/p&gt;
 
@@ -330,9 +330,9 @@ packageJobJar: &lt;span class=&quot;o&quot;&gt;[&lt;/span&gt;/mnt/hadoop/hadoop-
    <link href="http://ilyapimenov.com/blog/2014/09/19/lua-scripts-in-redis-within-nodejs.html"/>
    <updated>2014-09-19T00:00:00+02:00</updated>
    <id>http://ilyapimenov.com/blog/2014/09/19/lua-scripts-in-redis-within-nodejs</id>
-   <content type="html">&lt;p&gt;We don’t need to tell you what Redis is. Most engineers built a strong love to it over the years for the simplicity and power it gives you. &lt;/p&gt;
+   <content type="html">&lt;p&gt;We don’t need to tell you what Redis is. Most engineers built a strong love to it over the years for the simplicity and power it gives you.&lt;/p&gt;
 
-&lt;p&gt;Although Lua support was introduced quite some time ago, the average internet tells us that it didn’t really kick off. &lt;/p&gt;
+&lt;p&gt;Although Lua support was introduced quite some time ago, the average internet tells us that it didn’t really kick off.&lt;/p&gt;
 
 &lt;p&gt;Here we share our experience with replacing part of the server side written in Node.JS with the Lua being executed in Redis,&lt;/p&gt;
 
@@ -340,7 +340,7 @@ packageJobJar: &lt;span class=&quot;o&quot;&gt;[&lt;/span&gt;/mnt/hadoop/hadoop-
 
 &lt;p&gt;So, we have this awesome product Bidder, that plays on the add market exchange. And in order to have all nodes notified of current situation, we use Redis database to share the current state, amount of money available to a particular operation among all the bidders running in the cloud.&lt;/p&gt;
 
-&lt;p&gt;This data structure is rather complex and dependent on each other. For example, consider it to be a tree of nodes, where each branch eats cookies &lt;/p&gt;
+&lt;p&gt;This data structure is rather complex and dependent on each other. For example, consider it to be a tree of nodes, where each branch eats cookies&lt;/p&gt;
 
 &lt;p&gt;Like so:&lt;/p&gt;
 
@@ -379,15 +379,15 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;h2 id=&quot;getting-all-together&quot;&gt;Getting all together&lt;/h2&gt;
 
-&lt;p&gt;Let’s put it all together. We will try to address task stated in Why section of this article: a tree-like structure that propagates it changes to all the parent nodes. &lt;/p&gt;
+&lt;p&gt;Let’s put it all together. We will try to address task stated in Why section of this article: a tree-like structure that propagates it changes to all the parent nodes.&lt;/p&gt;
 
 &lt;p&gt;First things first — you need to get Lua running locally on your machine in order to run Lua scripts as you are developing them.&lt;/p&gt;
 
-&lt;p&gt;I recommend you to install &lt;code&gt;luarocks&lt;/code&gt;, a Lua-packet manager (what &lt;code&gt;npm&lt;/code&gt; is to NodeJS, &lt;code&gt;cocoapods&lt;/code&gt; are to Objective C,  &lt;code&gt;mvn&lt;/code&gt; to Java, &lt;code&gt;leiningen&lt;/code&gt; to Clojure). With &lt;code&gt;brew&lt;/code&gt; on Mac: &lt;/p&gt;
+&lt;p&gt;I recommend you to install &lt;code&gt;luarocks&lt;/code&gt;, a Lua-packet manager (what &lt;code&gt;npm&lt;/code&gt; is to NodeJS, &lt;code&gt;cocoapods&lt;/code&gt; are to Objective C,  &lt;code&gt;mvn&lt;/code&gt; to Java, &lt;code&gt;leiningen&lt;/code&gt; to Clojure). With &lt;code&gt;brew&lt;/code&gt; on Mac:&lt;/p&gt;
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;brew install luarocks&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;One thing to keep in mind, is that together with Lua runtime you will require a bunch of auxiliary libraries that are installed in Redis, in order to be able to write good, full blown scripts. &lt;/p&gt;
+&lt;p&gt;One thing to keep in mind, is that together with Lua runtime you will require a bunch of auxiliary libraries that are installed in Redis, in order to be able to write good, full blown scripts.&lt;/p&gt;
 
 &lt;p&gt;A quick note on the data format we use in Redis. Since most of our data structures are rather complex and require a set parameters on different levels, we utilize JSON in our Redis values.&lt;/p&gt;
 
@@ -403,7 +403,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;p&gt;So, if you have a node &lt;code&gt;a.b.c&lt;/code&gt; and you want to persist &lt;code&gt;{spent: 5}&lt;/code&gt; with the key &lt;code&gt;a.b.c&lt;/code&gt;,  the &lt;code&gt;spent&lt;/code&gt; amount in both keys &lt;code&gt;a&lt;/code&gt; and &lt;code&gt;a.b&lt;/code&gt; should also go up.&lt;/p&gt;
 
-&lt;p&gt;The basic approach to it will be — &lt;/p&gt;
+&lt;p&gt;The basic approach to it will be —&lt;/p&gt;
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-lua&quot; data-lang=&quot;lua&quot;&gt;&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;#&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ARGV&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;~=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;then&lt;/span&gt;
     &lt;span class=&quot;nb&quot;&gt;error&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s1&quot;&gt;&amp;#39;&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;your script: there&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&amp;#39;&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;s something fishy here, me not like this&amp;#39;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
@@ -479,7 +479,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;redis-cli evalsha &lt;span class=&quot;k&quot;&gt;$(&lt;/span&gt;redis-cli script load &lt;span class=&quot;s2&quot;&gt;&amp;quot;$(cat ./spend.lua)&amp;quot;&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;m&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;s2&quot;&gt;&amp;quot;a.b.c&amp;quot;&lt;/span&gt; 7&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;&lt;a href=&quot;http://www.youtube.com/watch?v=bYPqZlhpbQo&quot;&gt;Can you feel it&lt;/a&gt;? It just ran your Lua function in Redis. Note how we pass &lt;code&gt;1&lt;/code&gt; to our script before &lt;code&gt;&quot;a.b.c&quot;&lt;/code&gt;, it tells Redis how many arguments should be treated as keys and how many as a script arguments, those variables &lt;code&gt;KEYS&lt;/code&gt; and &lt;code&gt;ARGV&lt;/code&gt; respectively. &lt;/p&gt;
+&lt;p&gt;&lt;a href=&quot;http://www.youtube.com/watch?v=bYPqZlhpbQo&quot;&gt;Can you feel it&lt;/a&gt;? It just ran your Lua function in Redis. Note how we pass &lt;code&gt;1&lt;/code&gt; to our script before &lt;code&gt;&quot;a.b.c&quot;&lt;/code&gt;, it tells Redis how many arguments should be treated as keys and how many as a script arguments, those variables &lt;code&gt;KEYS&lt;/code&gt; and &lt;code&gt;ARGV&lt;/code&gt; respectively.&lt;/p&gt;
 
 &lt;h3 id=&quot;logs-and-the-situation&quot;&gt;Logs and the situation&lt;/h3&gt;
 
@@ -493,7 +493,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;p&gt;Now, for the main part our script is good. Yet, there are some issues to it.&lt;/p&gt;
 
-&lt;p&gt;Say, what if &lt;code&gt;a.b&lt;/code&gt; is not initialized? Then, according to our implementation we will first increase &lt;code&gt;spent&lt;/code&gt; amount on key &lt;code&gt;a&lt;/code&gt;, but then we will fail with &lt;code&gt;your script: key a.b doesn&#39;t exist&lt;/code&gt;. &lt;/p&gt;
+&lt;p&gt;Say, what if &lt;code&gt;a.b&lt;/code&gt; is not initialized? Then, according to our implementation we will first increase &lt;code&gt;spent&lt;/code&gt; amount on key &lt;code&gt;a&lt;/code&gt;, but then we will fail with &lt;code&gt;your script: key a.b doesn&#39;t exist&lt;/code&gt;.&lt;/p&gt;
 
 &lt;p&gt;That will bring our system in an inconsistent state — not cool. Overall we want either all in or all out.&lt;/p&gt;
 
@@ -703,7 +703,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;p&gt;Now that you have your Lua scripts thoroughly tested it is time to run them in production. The basic idea is to load them once on application startup and keep the resulting &lt;code&gt;SHA&lt;/code&gt;, so that you won’t have to send the script there and back each and every time upon request.&lt;/p&gt;
 
-&lt;p&gt;Instead of thousand of words, the CoffeeScript snippet that will do just that — &lt;/p&gt;
+&lt;p&gt;Instead of thousand of words, the CoffeeScript snippet that will do just that —&lt;/p&gt;
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-coffeescript&quot; data-lang=&quot;coffeescript&quot;&gt;&lt;span class=&quot;nv&quot;&gt;redis = &lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;require&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&amp;#39;redis&amp;#39;&lt;/span&gt;
 
@@ -756,7 +756,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;h3 id=&quot;puppet-configuration-for-jenkins&quot;&gt;Puppet configuration for Jenkins&lt;/h3&gt;
 
-&lt;p&gt;We utilize Jenkins with JUnit test result reports, Busted works with it just fine with XUnit reporting engine — &lt;/p&gt;
+&lt;p&gt;We utilize Jenkins with JUnit test result reports, Busted works with it just fine with XUnit reporting engine —&lt;/p&gt;
 
 &lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span class=&quot;nv&quot;&gt;$ &lt;/span&gt;busted -o junit ./test&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
@@ -1057,7 +1057,7 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
   &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;merge &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;this&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;other&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
     &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;merge-with-hyperloglog&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;other&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)))&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. Though, not used in this particular example, will be used extensively in reallife scenario, when aggregating already obtainded aggregated results (that will hold not offers, but HyperLogLog values). &lt;/p&gt;
+&lt;p&gt;As you can see, this will merge whatever you feed it, and provide you with the HyperLogLog value. Though, not used in this particular example, will be used extensively in reallife scenario, when aggregating already obtainded aggregated results (that will hold not offers, but HyperLogLog values).&lt;/p&gt;
 
 &lt;p&gt;And then finally, let’s throw in some glue to aggregate HyperLogLog values in the Cascalog queries:&lt;/p&gt;
 
@@ -1214,6 +1214,8 @@ And then if &lt;code&gt;abi&lt;/code&gt; eats &lt;code&gt;3&lt;/code&gt; and &lt
 
 &lt;p style=&quot;text-align: center;&quot;&gt;Table 4. Demo output&lt;/p&gt;
 
+&lt;noscript&gt;&lt;pre&gt;400: Invalid request
+&lt;/pre&gt;&lt;/noscript&gt;
 &lt;script src=&quot;https://gist.github.com/7319327.js&quot;&gt; &lt;/script&gt;
 
 &lt;h1 id=&quot;links&quot;&gt;Links&lt;/h1&gt;

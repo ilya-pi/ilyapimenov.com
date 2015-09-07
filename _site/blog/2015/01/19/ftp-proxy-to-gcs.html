@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!--[if lt IE 7 ]><html class="ie ie6" lang="en"> <![endif]-->
+<!--[if IE 7 ]><html class="ie ie7" lang="en"> <![endif]-->
+<!--[if IE 8 ]><html class="ie ie8" lang="en"> <![endif]-->
+<!--[if (gte IE 9)|!(IE)]><!--><html lang="en"> <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ilya Pimenov - FTP Proxy to Google Cloud Storage</title>
+  <meta name="author" content="Ilya Pimenov" />
+  <meta name="description" content="The blog of Ilya Pimenov" />
+  <link rel="canonical" href="http://ilyapimenov.com/blog/2015/01/19/ftp-proxy-to-gcs.html" />
+
+  <!-- <link href="//fonts.googleapis.com/css?family=Open+Sans:600,800" rel="stylesheet" type="text/css"> -->
+  <link href="http://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700,800" rel="stylesheet" type="text/css">
+  <link rel="shortcut icon" href="/favicon.png">
+  <link rel="alternate" type="application/rss+xml" title="Ilya Pimenov" href="http://ilyapimenov.com/atom.xml" />
+
+  <link rel="stylesheet" href="/assets/css/all.css">
+<!--[if IE 7]>
+  <link rel="stylesheet" href="/assets/css/font-awesome-ie7.min.css">
+<![endif]-->
+</head>
+<body>
+  <div class="container">
+    <div class="four columns sidebar">
+      <nav>
+  <h1>Hi,</h1>
+  <a href="/">
+<!--     <img src="/logo.png" id="logo" alt="Blog logo"/> -->
+    <img src="//2.gravatar.com/avatar/637a92c02ed1605df97e8c16cbfaad7e?&r=x&s=240" id="logo" alt="Blog logo"/>
+  </a>
+  <h2>I'm <a href="/">Ilya Pimenov</a>.</h2>
+  <hr/>
+  <ul>
+  <p>28 y/o hacker with extensive interest in high load software, big data, deep app integration and SaaS solutions.</p>
+  <p>Currently casting spells at <a href="http://ebay.nl/">eBay</a>.</p>
+  <hr/>
+  <div>
+    <div id="social">
+      Follow me:
+<div id="stalker">
+  
+  <a title="ilya-pi on Github" href="http://github.com/ilya-pi">
+    <i class="icon-github-sign"></i>
+  </a>
+  
+
+  
+  <a title="ilya-pi on Hacker News" href="http://news.ycombinator.com/user?id=ilya-pi">
+    <i class="icon-sign-blank"></i>
+    <span class="icon-overlay icon-hn">Y</span>
+  </a>
+  
+
+  
+
+  <a title="RSS feed" id="rss" href="/atom.xml">
+    <i class="icon-rss-sign"></i>
+  </a>
+</div>
+    </div>
+  </div>
+  </ul>
+</nav>
+    </div>
+
+    <div class="eleven columns content">
+      <p class="meta">
+  January 19, 2015 
+  <a href="/">
+    <i class="home icon-home"></i>
+  </a>
+</p>
+
+<h1 class="title">FTP Proxy to Google Cloud Storage</h1>
+
+<div id="post">
+  <h1 id="introduction">Introduction</h1>
+
+<p>After reading this article you will be able to setup an FTP server on a Google Cloud Compute instance, that uploads/downloads content directly to/from Google Cloud Storage. For EC2 backed with S3 refer to [1].</p>
+
+<h1 id="step1-setting-up-google-cloud-engine-instance">Step1: Setting up Google Cloud Engine instance</h1>
+
+<p>To setup an instance, install <code>gcloud</code>, Google Cloud command-line util following these <a href="https://cloud.google.com/sdk/">instructions</a>.</p>
+
+<p>Then fire up the console and do the following:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>gcloud compute instances create ftp-proxy --image ubuntu-1404-trusty-v20141212 --image-project ubuntu-os-cloud --zone europe-west1-b --machine-type n1-standard-1 --tags ftp-proxy ftpproxy</code></pre></div>
+
+<p>This will fire up a machine called <code>ftp-proxy</code> on your Google Cloud Engine account in zone <code>europe-west1-b</code> (change to the one desired).</p>
+
+<div class="note">Looking ahead, It is important to go for ubuntu-1404 image. With earlier versions of ubuntu you wont be able to install gcsfs, due to missing libboost-regex1.49.0 and libboost-thread1.49.0 libraries, while ubuntu-1210 is out of support. <br /><br />With debian you will have issues configuring vsftpd service that enables ftp access to your server: you won't be able to restrict users to their home directories (<a href="https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=735191#10">bug-735191</a>).</div>
+
+<p>Now in order to ssh into this machine:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>gcloud compute ssh ftp-proxy --zone europe-west1-b</code></pre></div>
+
+<p>Handy, eh?</p>
+
+<h1 id="step-2-mounting-google-cloud-storage-onto-the-instance">Step 2: Mounting Google Cloud Storage onto the instance</h1>
+
+<p>We’ll require a thirdparty tool in order to mount Google Cloud Storage to our instance, in particular — <a href="https://code.google.com/p/gcsfs/">gcsfs</a>.</p>
+
+<p>Get the proper download link from their website, you will need this one — <code>gcsfs_0.15-1_amd64.deb</code>, and then:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>wget https://drive.google.com/uc?id<span class="o">=</span>0B071t7_clY1HdG8zUTc5TGszU0E<span class="p">&amp;</span><span class="nb">export</span><span class="o">=</span>download
+<span class="nv">$ </span>mv uc<span class="se">\?</span>id<span class="se">\=</span>0B071t7_clY1HdG8zUTc5TGszU0E gcsfs_0.15-1_amd64.deb</code></pre></div>
+
+<p>Install the package itself:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo dpkg -i gcsfs_0.15-1_amd64.deb</code></pre></div>
+
+<p>Next update the dependencies and work out through the missing libraries (slightly dirty approach, hopefully won’t be needed in  the upcoming future):</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo apt-get update
+
+<span class="nv">$ </span>wget http://launchpadlibrarian.net/141626883/libboost-regex1.49.0_1.49.0-4_amd64.deb
+<span class="nv">$ </span>sudo dpkg -i libboost-regex1.49.0_1.49.0-4_amd64.deb
+
+<span class="nv">$ </span>wget http://launchpadlibrarian.net/141626895/libboost-thread1.49.0_1.49.0-4_amd64.deb
+<span class="nv">$ </span>sudo dpkg -i libboost-thread1.49.0_1.49.0-4_amd64.deb
+
+<span class="nv">$ </span>wget http://launchpadlibrarian.net/153428081/libicu48_4.8.1.1-12ubuntu2_amd64.deb
+<span class="nv">$ </span>sudo dpkg -i libicu48_4.8.1.1-12ubuntu2_amd64.deb
+
+<span class="nv">$ </span>sudo apt-get install -f</code></pre></div>
+
+<p>Check that everything is fine:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>gcsfs -V
+
+&gt;gcsfs, 0.15 <span class="o">(</span>r792M<span class="o">)</span>, FUSE driver <span class="k">for</span> cloud object storage services
+&gt;enabled services: aws, fvs, google-storage</code></pre></div>
+
+<p>Let’s authenticate it with Google Cloud Storage:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo gcsfs_gs_get_token /etc/gcsfs_token
+
+&gt; Paste this URL into your browser:
+&gt;https://accounts.google.com/o/oauth2/auth?client_id<span class="o">=</span>xxxxxxxxxxxx.apps.googleusercontent.com<span class="p">&amp;</span><span class="nv">redirect_uri</span><span class="o">=</span>urn%3aietf%3awg%3aoauth%3a2.0%3aoob<span class="p">&amp;</span><span class="nv">scope</span><span class="o">=</span>https%3a%2f%2fwww.googleapis.com%2fauth%2fdevstorage.read_write<span class="p">&amp;</span><span class="nv">response_type</span><span class="o">=</span>code
+&gt;
+&gt;Please enter the authorization code:
+&gt;</code></pre></div>
+
+<p><strong>Important:</strong> In the string taht is given to authorize against google cloud (the “Paste this URL into your browser” link) find the text <code>read_write</code> and replace it with <code>full_control</code>. Otherwise listing in the folders won’t work and it is very likely you will have random transient I/O Errors.</p>
+
+<p>Create gcsfs configuration file <code>/etc/gcsfs_config</code> and paste in:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">service</span><span class="o">=</span>google-storage
+<span class="c"># Your bucket on Google Cloud Storage, i.e. `xyz-ftp-bucket`</span>
+<span class="nv">bucket_name</span><span class="o">=</span>&lt;Bucket-Name&gt;
+<span class="nv">gs_token_file</span><span class="o">=</span>/etc/gcsfs_token</code></pre></div>
+
+<p>Create mount point and mount the cloud storage:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>mkdir /mnt/ftp
+<span class="nv">$ </span>sudo gcsfs -o <span class="nv">config</span><span class="o">=</span>/etc/gcsfs_config -o allow_other /mnt/ftp</code></pre></div>
+
+<h1 id="step-3-setup-ftp-daemon-vsftpd">Step 3: Setup FTP daemon <code>vsftpd</code></h1>
+
+<p>Add the new repository and install with <code>apt-get</code>:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo add-apt-repository ppa:thefrontiergroup/vsftpd
+<span class="nv">$ </span>sudo apt-get -y install vsftpd</code></pre></div>
+
+<p>Configure it — <code>sudo nano /etc/vsftpd.conf</code>, here are the properties you want to set to <code>YES</code> in order for each user to have his isolated “directory” on your ftp, without being able to mess up with others:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="c"># You may restrict local users to their home directories.  See the FAQ for</span>
+<span class="c"># the possible risks in this before using chroot_local_user or</span>
+<span class="c"># chroot_list_enable below.</span>
+<span class="nv">chroot_local_user</span><span class="o">=</span>YES
+<span class="c"># Keep non-chroot listed users jailed</span>
+<span class="nv">allow_writeable_chroot</span><span class="o">=</span>YES</code></pre></div>
+
+<p>Add passive support to your configuration:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="c"># Passive support</span>
+<span class="nv">pasv_enable</span><span class="o">=</span>yes
+<span class="nv">pasv_min_port</span><span class="o">=</span><span class="m">15393</span> <span class="c"># The start port range configured in the security group</span>
+<span class="nv">pasv_max_port</span><span class="o">=</span><span class="m">15592</span> <span class="c"># The end port range configured int he security group</span>
+<span class="nv">pasv_address</span><span class="o">=</span>xxx.xxx.xxx.xxx <span class="c"># the public IP address of the FTP serv</span></code></pre></div>
+
+<p>If later on encountered <a href="http://askubuntu.com/questions/413677/vsftpd-530-login-incorrect">530 Login incorrect</a>, rename the pam service to:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">pam_service_name</span><span class="o">=</span>ftp</code></pre></div>
+
+<p>All done, restart the service:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo service vsftpd restart</code></pre></div>
+
+<h1 id="step-4-creating-new-users">Step 4: Creating new users</h1>
+
+<p>Now in order to create a new user <code>alfred</code> with home directory <code>/mnt/ftp/alfred</code>, which will be persisted under <code>gs://&lt;Bucket-Name&gt;/alfred</code> on Google Cloud Storage, ssh into the machine:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>gcloud compute ssh ftp-proxy --zone europe-west1-b</code></pre></div>
+
+<p>And create the user himself:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>sudo useradd -d /mnt/ftp/alfred -s /sbin/nologin alfred
+<span class="nv">$ </span>sudo mkdir /mnt/ftp/alfred
+<span class="nv">$ </span>sudo chown alfred /mnt/ftp/alfred
+<span class="nv">$ </span>sudo passwd alfred
+&gt; New password:</code></pre></div>
+
+<h1 id="step-5-verification">Step 5: Verification</h1>
+
+<p>From your local machine fire this to see it in action —</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>ftp ftp://alfred:alfred@xxx.xxx.xxx.xxx
+&gt;put ./&lt;Some-local-file&gt; &lt;File-name-to-put-as-on-Ftp&gt;</code></pre></div>
+
+<p>And look at your Google Cloud Storage now:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>gsutil ls gs://&lt;Bucket-Name&gt;/alfred/
+&gt; gs://&lt;Bucket-Name&gt;/alfred/
+&gt; gs://&lt;Bucket-Name&gt;/alfred/&lt;File-name-to-put-as-on-Ftp&gt;</code></pre></div>
+
+<p>Yay! You are all set now.</p>
+
+<h1 id="links">Links</h1>
+
+<ol>
+  <li><a href="https://cloud.google.com/">Google Cloud Platform</a></li>
+  <li><a href="https://cloud.google.com/hadoop/google-cloud-storage-connector">Google cloud storage connector</a></li>
+  <li><a href="http://www.codeproject.com/Tips/546903/Amazon-AWS-EC-FTP-server-using-S-as-the-backend">Amazon AWS: EC2 FTP server using S3 as the backend</a></li>
+</ol>
+
+</div>
+
+
+<div id="author">
+  by <a href="http://ilyapimenov.com/">Ilya Pimenov</a>
+</div>
+
+
+
+    <div id="disqus_thread"></div>
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'ilya-pi'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function() {
+            var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+            dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+            (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+        })();
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>    
+
+
+<hr>
+
+<div id="related">
+  <h3>Related Posts</h3>
+  <ul class="posts">
+    
+    
+    <li>
+      <span>12 Nov 2014 &raquo;</span> <a href="/blog/2014/11/12/unzip-files-on-s3-concatenate-gzip-and-put-on-gs.html">Unzip files on S3, concatenate, gzip and put on Google Cloud Storage</a>
+    </li>
+    
+    
+    
+    <li>
+      <span>19 Sep 2014 &raquo;</span> <a href="/blog/2014/09/19/lua-scripts-in-redis-within-nodejs.html">Lua scripts in Redis within Node.js</a>
+    </li>
+    
+    
+    
+    <li>
+      <span>14 Nov 2013 &raquo;</span> <a href="/blog/2013/11/14/hyperloglog-with-cascalog.html">HyperLogLog with Cascalog</a>
+    </li>
+    
+    
+  </ul>
+</div>
+    
+      <div class="footer">
+        <div class="disclaimer">
+  <p>
+    
+        The postings on this site are my own and don't necessarily represent my employer’s positions, strategies or opinions.<br/>
+    
+
+    © Ilya Pimenov, 2013-2015 &mdash; built with Jekyll using Lagom theme
+  </p>
+</div>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-64421368-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+</body>
+</html>

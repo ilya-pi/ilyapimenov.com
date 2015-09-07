@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<!--[if lt IE 7 ]><html class="ie ie6" lang="en"> <![endif]-->
+<!--[if IE 7 ]><html class="ie ie7" lang="en"> <![endif]-->
+<!--[if IE 8 ]><html class="ie ie8" lang="en"> <![endif]-->
+<!--[if (gte IE 9)|!(IE)]><!--><html lang="en"> <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ilya Pimenov - Lua scripts in Redis within Node.js</title>
+  <meta name="author" content="Ilya Pimenov" />
+  <meta name="description" content="The blog of Ilya Pimenov" />
+  <link rel="canonical" href="http://ilyapimenov.com/blog/2014/09/19/lua-scripts-in-redis-within-nodejs.html" />
+
+  <!-- <link href="//fonts.googleapis.com/css?family=Open+Sans:600,800" rel="stylesheet" type="text/css"> -->
+  <link href="http://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700,800" rel="stylesheet" type="text/css">
+  <link rel="shortcut icon" href="/favicon.png">
+  <link rel="alternate" type="application/rss+xml" title="Ilya Pimenov" href="http://ilyapimenov.com/atom.xml" />
+
+  <link rel="stylesheet" href="/assets/css/all.css">
+<!--[if IE 7]>
+  <link rel="stylesheet" href="/assets/css/font-awesome-ie7.min.css">
+<![endif]-->
+</head>
+<body>
+  <div class="container">
+    <div class="four columns sidebar">
+      <nav>
+  <h1>Hi,</h1>
+  <a href="/">
+<!--     <img src="/logo.png" id="logo" alt="Blog logo"/> -->
+    <img src="//2.gravatar.com/avatar/637a92c02ed1605df97e8c16cbfaad7e?&r=x&s=240" id="logo" alt="Blog logo"/>
+  </a>
+  <h2>I'm <a href="/">Ilya Pimenov</a>.</h2>
+  <hr/>
+  <ul>
+  <p>28 y/o hacker with extensive interest in high load software, big data, deep app integration and SaaS solutions.</p>
+  <p>Currently casting spells at <a href="http://ebay.nl/">eBay</a>.</p>
+  <hr/>
+  <div>
+    <div id="social">
+      Follow me:
+<div id="stalker">
+  
+  <a title="ilya-pi on Github" href="http://github.com/ilya-pi">
+    <i class="icon-github-sign"></i>
+  </a>
+  
+
+  
+  <a title="ilya-pi on Hacker News" href="http://news.ycombinator.com/user?id=ilya-pi">
+    <i class="icon-sign-blank"></i>
+    <span class="icon-overlay icon-hn">Y</span>
+  </a>
+  
+
+  
+
+  <a title="RSS feed" id="rss" href="/atom.xml">
+    <i class="icon-rss-sign"></i>
+  </a>
+</div>
+    </div>
+  </div>
+  </ul>
+</nav>
+    </div>
+
+    <div class="eleven columns content">
+      <p class="meta">
+  September 19, 2014 
+  <a href="/">
+    <i class="home icon-home"></i>
+  </a>
+</p>
+
+<h1 class="title">Lua scripts in Redis within Node.js</h1>
+
+<div id="post">
+  <p>We don’t need to tell you what Redis is. Most engineers built a strong love to it over the years for the simplicity and power it gives you.</p>
+
+<p>Although Lua support was introduced quite some time ago, the average internet tells us that it didn’t really kick off.</p>
+
+<p>Here we share our experience with replacing part of the server side written in Node.JS with the Lua being executed in Redis,</p>
+
+<h2 id="why">Why</h2>
+
+<p>So, we have this awesome product Bidder, that plays on the add market exchange. And in order to have all nodes notified of current situation, we use Redis database to share the current state, amount of money available to a particular operation among all the bidders running in the cloud.</p>
+
+<p>This data structure is rather complex and dependent on each other. For example, consider it to be a tree of nodes, where each branch eats cookies</p>
+
+<p>Like so:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash">a <span class="o">[</span> ate: <span class="m">0</span> <span class="o">]</span>
+<span class="p">|</span>--- ab <span class="o">[</span> ate: <span class="m">0</span> <span class="o">]</span>
+      <span class="p">|</span>--- abe <span class="o">[</span> ate: <span class="m">0</span> <span class="o">]</span>
+      <span class="p">|</span>--- abi <span class="o">[</span> ate: <span class="m">0</span> <span class="o">]</span>
+<span class="p">|</span>--- ac <span class="o">[</span> ate: <span class="m">0</span> <span class="o">]</span></code></pre></div>
+
+<p>So, if the branch <code>abe</code> ate 2 cookies, <code>a</code> should have a balance of two eaten cookies — <code>a [ ate: 2 ]</code>.
+And then if <code>abi</code> eats <code>3</code> and <code>ac</code> eats <code>1</code>, then it should go like:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash">a <span class="o">[</span> ate: <span class="nv">6</span> <span class="o">=</span> <span class="m">0</span> + <span class="m">2</span> + <span class="m">3</span> + <span class="m">1</span> <span class="o">]</span>
+<span class="p">|</span>--- ab <span class="o">[</span> ate: <span class="nv">5</span> <span class="o">=</span> <span class="m">0</span> + <span class="m">2</span> + <span class="m">3</span> <span class="o">]</span>
+      <span class="p">|</span>--- abe <span class="o">[</span> ate: <span class="nv">2</span> <span class="o">=</span> <span class="m">0</span> + <span class="m">2</span> <span class="o">]</span>
+      <span class="p">|</span>--- abi <span class="o">[</span> ate: <span class="nv">3</span> <span class="o">=</span> <span class="m">0</span> + <span class="m">3</span> <span class="o">]</span>
+<span class="p">|</span>--- ac <span class="o">[</span> ate: <span class="nv">1</span> <span class="o">=</span> <span class="m">0</span> + <span class="m">1</span> <span class="o">]</span></code></pre></div>
+
+<p>So, previously we would have this big script in NodeJS that will batch all outgoing operations, and respectively update all nodes of the bank, this would be done from a single machine, called <code>Bank</code>. All other machines would connect to it through a <code>BankClient</code> — basically EventEmitter that talks to a <code>Bank</code> service. In this architecture you cannot have two Bank machines, as you would’ve run into concurrency issues that way. There are transactions in Redis, but when you have to combine them together with business logic, it gets rather messy as you cannot simply rollback.</p>
+
+<p>But most importantly of all, this is ultimately not scalable and you have to maintain a lot of synchronization code in NodeJS to interact with your bank’s persistence.</p>
+
+<h2 id="solution">Solution</h2>
+
+<p>An absolute win in this case is to incorporate all your logic into Redis. Think about it — you have one single threaded database that performs your business logic requests in an atomic way. And later on you can shard it, by the main key of each data structure being stored. It doesn’t really get any easier than this.</p>
+
+<p>Basically, it’s not a database any longer, it is a persistence container, and you deploy your accounting business logic into it.</p>
+
+<h2 id="how">How</h2>
+
+<p>Now, how do you do this with Redis? By utilizing the <code>EVAL</code> command — http://redis.io/commands/EVAL. It enables you to run Lua scripts inside your Redis instance.</p>
+
+<p>Now, a lot of people might get sceptical once they hear Lua. Another language, another platform, all the burden of maintenance and testing issues.</p>
+
+<p>What we aim to show here — is that all those are addressed in rather classical fashion, by unit-tests and integration tests, and you will find the approach of running Lua on top of Redis surprisingly pleasing.</p>
+
+<h2 id="getting-all-together">Getting all together</h2>
+
+<p>Let’s put it all together. We will try to address task stated in Why section of this article: a tree-like structure that propagates it changes to all the parent nodes.</p>
+
+<p>First things first — you need to get Lua running locally on your machine in order to run Lua scripts as you are developing them.</p>
+
+<p>I recommend you to install <code>luarocks</code>, a Lua-packet manager (what <code>npm</code> is to NodeJS, <code>cocoapods</code> are to Objective C,  <code>mvn</code> to Java, <code>leiningen</code> to Clojure). With <code>brew</code> on Mac:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>brew install luarocks</code></pre></div>
+
+<p>One thing to keep in mind, is that together with Lua runtime you will require a bunch of auxiliary libraries that are installed in Redis, in order to be able to write good, full blown scripts.</p>
+
+<p>A quick note on the data format we use in Redis. Since most of our data structures are rather complex and require a set parameters on different levels, we utilize JSON in our Redis values.</p>
+
+<p>The only third party libraries, not native to Lua are <code>struct</code>, <code>CJSON</code> and <code>cmsgpack</code>, as can be seen in <a href="http://redis.io/commands/EVAL">EVAL spec</a>. With <code>luarocks</code> it is a no-brainer:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>luarocks install lua-cjson</code></pre></div>
+
+<p>Now we are good to write our first Lua script!</p>
+
+<h3 id="update-the-node-and-all-parent-nodes">Update the node and all parent nodes</h3>
+
+<p>In our sample task we will update the node and all it parent nodes. Nodes are keys in Redis that are composed of its parent names and its own name all dot separated.</p>
+
+<p>So, if you have a node <code>a.b.c</code> and you want to persist <code>{spent: 5}</code> with the key <code>a.b.c</code>,  the <code>spent</code> amount in both keys <code>a</code> and <code>a.b</code> should also go up.</p>
+
+<p>The basic approach to it will be —</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="k">if</span> <span class="o">#</span><span class="n">ARGV</span> <span class="o">~=</span> <span class="mi">1</span> <span class="k">then</span>
+    <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">your script: there</span><span class="se">\&#39;</span><span class="s">s something fishy here, me not like this&#39;</span><span class="p">)</span>
+<span class="k">end</span>
+
+<span class="k">if</span> <span class="o">#</span><span class="n">KEYS</span> <span class="o">~=</span> <span class="mi">1</span> <span class="k">then</span>
+    <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">your script: invalid inputs, one key at a time&#39;</span><span class="p">)</span>
+<span class="k">end</span>
+
+<span class="kd">local</span> <span class="n">spent</span> <span class="o">=</span> <span class="nb">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+<span class="c1">-- This node will give you parent node. Supposedly if there is a key </span>
+<span class="c1">-- nodeOne.nodeTwo.nodeTree, then nodeTwo is a direct parent of</span>
+<span class="c1">--  nodeThree; and nodeOne is an indirect parent to nodeThree</span>
+<span class="kd">local</span> <span class="n">parent</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">account</span><span class="p">)</span>
+    <span class="c1">-- searches from the end of the string instead</span>
+    <span class="c1">-- of the beginning, as string.find does</span>
+    <span class="kd">local</span> <span class="n">i</span> <span class="o">=</span> <span class="n">account</span><span class="p">:</span><span class="n">match</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">^.*()%.&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">i</span> <span class="k">then</span>
+        <span class="k">return</span> <span class="nb">string.sub</span><span class="p">(</span><span class="n">account</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="k">end</span>
+
+<span class="kd">local</span> <span class="n">spend</span> <span class="o">=</span> <span class="kc">nil</span> <span class="c1">-- in order to reference to itself in a recursive way</span>
+<span class="n">spend</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">amount</span><span class="p">)</span>
+    <span class="kd">local</span> <span class="n">node</span> <span class="o">=</span> <span class="n">redis</span><span class="p">.</span><span class="n">call</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">GET&#39;</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">node</span> <span class="k">then</span>
+        <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">your script: key &#39;</span> <span class="o">..</span> <span class="n">key</span> <span class="o">..</span> <span class="s1">&#39;</span><span class="s"> doesnt exist&#39;</span><span class="p">)</span>
+    <span class="k">else</span>
+        <span class="c1">-- read it from Redis and decode</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="n">cjson</span><span class="p">.</span><span class="n">decode</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="c1">-- Nil check</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">node</span><span class="p">.</span><span class="n">spent</span> <span class="k">then</span>
+        <span class="n">node</span><span class="p">.</span><span class="n">spent</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">end</span>
+
+    <span class="c1">-- recurse, first spend this amount on the parent nodes</span>
+    <span class="kd">local</span> <span class="n">parent</span> <span class="o">=</span> <span class="n">parent</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">parent</span> <span class="k">then</span>
+        <span class="kd">local</span> <span class="n">spentByParent</span> <span class="o">=</span> <span class="n">spend</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">amount</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="c1">-- spend this amount on the child node</span>
+    <span class="n">node</span><span class="p">.</span><span class="n">spent</span> <span class="o">=</span> <span class="n">node</span><span class="p">.</span><span class="n">spent</span> <span class="o">-</span> <span class="n">amount</span>
+
+    <span class="kd">local</span> <span class="n">nodeString</span> <span class="o">=</span> <span class="n">cjson</span><span class="p">.</span><span class="n">encode</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="kd">local</span> <span class="n">embeddedNodeString</span> <span class="o">=</span> <span class="n">cjson</span><span class="p">.</span><span class="n">encode</span><span class="p">(</span><span class="n">nodeString</span><span class="p">)</span> <span class="c1">-- escape inner quotes, adds surrounding quotes</span>
+    <span class="c1">-- parser friendly log</span>
+    <span class="n">redis</span><span class="p">.</span><span class="n">log</span><span class="p">(</span><span class="n">redis</span><span class="p">.</span><span class="n">LOG_NOTICE</span><span class="p">,</span> <span class="s1">&#39;</span><span class="s">spend.update: { &quot;key&quot;:</span><span class="se">\&quot;</span><span class="s">&#39;</span> <span class="o">..</span> <span class="n">key</span> <span class="o">..</span> <span class="s1">&#39;</span><span class="se">\&quot;</span><span class="s">, &quot;spent&quot;:&#39;</span> <span class="o">..</span> <span class="n">amount</span> <span class="o">..</span> <span class="s1">&#39;</span><span class="s">, &quot;value&quot;:&#39;</span> <span class="o">..</span> <span class="n">embeddedNodeString</span> <span class="o">..</span><span class="s1">&#39;</span><span class="s">}&#39;</span><span class="p">)</span>
+
+    <span class="n">redis</span><span class="p">.</span><span class="n">call</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">SET&#39;</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">nodeString</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">spend</span>
+<span class="k">end</span>
+
+<span class="c1">-- Since there are no arrays in Lua, only table, keep in mind that they are not 0-based, but 1</span>
+<span class="n">spend</span><span class="p">(</span><span class="n">KEYS</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nb">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span></code></pre></div>
+
+<p>Save this file as <code>spend.lua</code> file and let’s run this sweetness.</p>
+
+<h3 id="running-the-sweetness">Running the sweetness</h3>
+
+<p>We need to put in some initial values. Normally you would have a separate script to initialize them. For the purpose of this article this will do:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>redis-cli <span class="nb">set </span>a <span class="s2">&quot;{\&quot;spent\&quot;: 0}&quot;</span>
+<span class="nv">$ </span>redis-cli <span class="nb">set </span>a.b <span class="s2">&quot;{\&quot;spent\&quot;: 0}&quot;</span>
+<span class="nv">$ </span>redis-cli <span class="nb">set </span>a.b.c <span class="s2">&quot;{\&quot;spent\&quot;: 0}&quot;</span></code></pre></div>
+
+<p>Sweet, now to run the script up-below on node <code>a.b.c</code> with a value of <code>7</code>:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>redis-cli evalsha <span class="k">$(</span>redis-cli script load <span class="s2">&quot;$(cat ./spend.lua)&quot;</span><span class="k">)</span> <span class="m">1</span> <span class="s2">&quot;a.b.c&quot;</span> 7</code></pre></div>
+
+<p><a href="http://www.youtube.com/watch?v=bYPqZlhpbQo">Can you feel it</a>? It just ran your Lua function in Redis. Note how we pass <code>1</code> to our script before <code>"a.b.c"</code>, it tells Redis how many arguments should be treated as keys and how many as a script arguments, those variables <code>KEYS</code> and <code>ARGV</code> respectively.</p>
+
+<h3 id="logs-and-the-situation">Logs and the situation</h3>
+
+<p>All logging from your scripts goes to the Redis log, therefore to see what is happening under the covers:</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>tail -F /usr/local/var/log/redis.log</code></pre></div>
+
+<p>Check your Redis config if not found — <code>redis-cli CONFIG GET logfile</code>.</p>
+
+<h3 id="transactions-and-exception-handling">Transactions and exception handling</h3>
+
+<p>Now, for the main part our script is good. Yet, there are some issues to it.</p>
+
+<p>Say, what if <code>a.b</code> is not initialized? Then, according to our implementation we will first increase <code>spent</code> amount on key <code>a</code>, but then we will fail with <code>your script: key a.b doesn't exist</code>.</p>
+
+<p>That will bring our system in an inconsistent state — not cool. Overall we want either all in or all out.</p>
+
+<p>Now there is a fairly simple thing you can do in order introduce transaction like behaviour:</p>
+
+<ol>
+  <li>Utilize <code>MSET</code> as a single write operation. Since Redis is single threaded — you don’t have to worry about all those <code>GET</code>s you have</li>
+  <li>Wrap the whole script with Lua’s <code>pcall</code> — basically a <code>try ... catch</code> block</li>
+</ol>
+
+<h4 id="mset-for-a-single-all-in-or-all-out"><code>MSET</code> for a single all in or all out</h4>
+
+<p>You’ll need an utility function at the top of your script:</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="kd">local</span> <span class="n">_cache</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="kd">local</span> <span class="n">redisMSET</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+    <span class="nb">table.insert</span><span class="p">(</span><span class="n">_cache</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="nb">table.insert</span><span class="p">(</span><span class="n">_cache</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+<span class="k">end</span></code></pre></div>
+
+<p>In code you would use these statements instead of all <code>SET</code>s:</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="n">redisMSET</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">SET&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="s">a.b&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="s">{&quot;spent&quot;: 12}&#39;</span><span class="p">)</span></code></pre></div>
+
+<p>And by the end of you script you would <em>commit</em> it all at once with <code>MSET</code>:</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="n">redis</span><span class="p">.</span><span class="n">call</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">MSET&#39;</span><span class="p">,</span> <span class="nb">unpack</span><span class="p">(</span><span class="n">_cache</span><span class="p">))</span></code></pre></div>
+
+<p>You can also go smart about it and do a wrapper around <code>GET</code> that will first check your <code>_cache</code> if it holds the desired key and if not — perform a call with <code>redis.call('GET'...</code>.</p>
+
+<h4 id="wrapping-into-try--catch-block">Wrapping into <code>try</code> … <code>catch</code> block</h4>
+
+<p>There is no magic with this one — you wrap the whole thing in <code>pcall</code> and you are done — it gives you <code>status</code> variable, that tells you if it went fine or not and the result of executing that block of code.</p>
+
+<p>The code will go like this —</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="kd">local</span> <span class="n">main</span> <span class="o">=</span> <span class="k">function</span><span class="p">()</span>
+    
+    <span class="c1">-- Your code goes here and constructs some `result` object</span>
+
+    <span class="k">return</span> <span class="n">result</span>
+<span class="k">end</span>
+
+<span class="kd">local</span> <span class="n">status</span><span class="p">,</span> <span class="n">res</span> <span class="o">=</span> <span class="nb">pcall</span><span class="p">(</span><span class="n">main</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">status</span> <span class="k">then</span>
+    <span class="c1">-- `main&#39; went fine: return `result`</span>
+    <span class="k">return</span> <span class="n">res</span>
+<span class="k">else</span>
+    <span class="c1">-- `main&#39; raised an error: take appropriate actions</span>
+    <span class="c1">-- there is no redis.LOG_ERROR level</span>
+    <span class="n">redis</span><span class="p">.</span><span class="n">log</span><span class="p">(</span><span class="n">redis</span><span class="p">.</span><span class="n">LOG_WARNING</span><span class="p">,</span> <span class="s1">&#39;</span><span class="s">error: &#39;</span> <span class="o">..</span> <span class="n">res</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">redis</span><span class="p">.</span><span class="n">error_reply</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">error: &#39;</span> <span class="o">..</span> <span class="n">res</span><span class="p">)</span>
+<span class="k">end</span></code></pre></div>
+
+<p>Combining it together with transactions:</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="kd">local</span> <span class="n">main</span> <span class="o">=</span> <span class="k">function</span><span class="p">()</span>
+    <span class="kd">local</span> <span class="n">_cache</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="kd">local</span> <span class="n">redisMSET</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+        <span class="nb">table.insert</span><span class="p">(</span><span class="n">_cache</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+        <span class="nb">table.insert</span><span class="p">(</span><span class="n">_cache</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="c1">-- your code goes here and constructs some `result` object</span>
+
+    <span class="n">redis</span><span class="p">.</span><span class="n">call</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">MSET&#39;</span><span class="p">,</span> <span class="nb">unpack</span><span class="p">(</span><span class="n">_cache</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">result</span>
+<span class="k">end</span>
+
+<span class="kd">local</span> <span class="n">status</span><span class="p">,</span> <span class="n">res</span> <span class="o">=</span> <span class="nb">pcall</span><span class="p">(</span><span class="n">main</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">status</span> <span class="k">then</span>
+    <span class="c1">-- `main&#39; went fine: return `result`</span>
+    <span class="k">return</span> <span class="n">res</span>
+<span class="k">else</span>
+    <span class="c1">-- `main&#39; raised an error: take appropriate actions</span>
+    <span class="c1">-- there is no redis.LOG_ERROR level</span>
+    <span class="n">redis</span><span class="p">.</span><span class="n">log</span><span class="p">(</span><span class="n">redis</span><span class="p">.</span><span class="n">LOG_WARNING</span><span class="p">,</span> <span class="s1">&#39;</span><span class="s">error: &#39;</span> <span class="o">..</span> <span class="n">res</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">redis</span><span class="p">.</span><span class="n">error_reply</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">error: &#39;</span> <span class="o">..</span> <span class="n">res</span><span class="p">)</span>
+<span class="k">end</span></code></pre></div>
+
+<p>Voilà!</p>
+
+<h3 id="unit-testing-our-sweet-lua-awesomeness">Unit-Testing our sweet Lua awesomeness</h3>
+
+<p>Now all this is good, but here at Screen6 we do unit-testing, and just to be sure and because it is a good way to go about things.</p>
+
+<p>There are two ways you can go about tests:</p>
+
+<ol>
+  <li>Test your Lua code with Lua unit tests</li>
+  <li>Test your Lua code on the application level. In our case — calling Lua script within Redis from CoffeeScript</li>
+</ol>
+
+<h3 id="unit-testing-with-busted">Unit Testing with Busted</h3>
+
+<p>We use <a href="http://olivinelabs.com/busted/">Busted</a> framework to run unit tests on our Lua scripts. If you are familiar with <a href="http://visionmedia.github.io/mocha/">Mocha</a>, you will feel at home right away.</p>
+
+<p>Testing is rather straightforward, there is only one thing to note, that you would prefer to run tests  “as if you are in Redis”, and therefore you would require some wrapper code to mock the API Redis provides you within Lua.</p>
+
+<p>A very basic implementation that will enable you to use these operations:</p>
+
+<ol>
+  <li>redis.call( ‘SET’, … )</li>
+  <li>redis.call( ‘MSET’, … )</li>
+  <li>redis.call( ‘GET’, … )</li>
+  <li>redis.log( … )</li>
+</ol>
+
+<p>Will look like this:</p>
+
+<div class="highlight"><pre><code class="language-lua" data-lang="lua"><span class="n">cjson</span> <span class="o">=</span> <span class="nb">require</span> <span class="s2">&quot;</span><span class="s">cjson&quot;</span>
+
+<span class="kd">local</span> <span class="n">DATABASE</span> <span class="o">=</span> <span class="p">{}</span>
+
+<span class="k">function</span> <span class="nf">switch</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+    <span class="n">t</span><span class="p">.</span><span class="n">case</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">self</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+        <span class="kd">local</span> <span class="n">f</span> <span class="o">=</span> <span class="n">self</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="ow">or</span> <span class="n">self</span><span class="p">.</span><span class="n">default</span>
+        <span class="k">if</span> <span class="n">f</span> <span class="k">then</span>
+            <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;</span><span class="s">function&quot;</span> <span class="k">then</span>
+                <span class="k">return</span> <span class="n">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">self</span><span class="p">)</span>
+            <span class="k">else</span>
+                <span class="nb">error</span><span class="p">(</span><span class="s2">&quot;</span><span class="s">case &quot;</span><span class="o">..</span><span class="nb">tostring</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">..</span><span class="s2">&quot;</span><span class="s"> not a function&quot;</span><span class="p">)</span>
+            <span class="k">end</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+      <span class="k">return</span> <span class="n">t</span>
+<span class="k">end</span>
+
+<span class="n">redis</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">call</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">operation</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+        <span class="n">mockRedis</span> <span class="o">=</span> <span class="n">switch</span> <span class="p">{</span>
+            <span class="p">[</span><span class="s1">&#39;</span><span class="s">SET&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="k">function</span> <span class="p">(</span><span class="n">x</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="o">#</span><span class="n">arg</span> <span class="o">~=</span> <span class="mi">2</span> <span class="k">then</span>
+                        <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">invalid amount of argumetns passed on to mockRedis.set&#39;</span><span class="p">)</span>
+                    <span class="k">else</span>
+                        <span class="n">DATABASE</span><span class="p">[</span><span class="n">arg</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="n">cjson</span><span class="p">.</span><span class="n">decode</span><span class="p">(</span><span class="n">arg</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+                    <span class="k">end</span>
+                <span class="k">end</span><span class="p">,</span>
+            <span class="p">[</span><span class="s1">&#39;</span><span class="s">MSET&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="k">function</span> <span class="p">(</span><span class="n">x</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="o">#</span><span class="n">arg</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">~=</span> <span class="mi">0</span> <span class="k">then</span>
+                        <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">invalid amount or arguments (not even) passed on to the mockRedis.mset&#39;</span><span class="p">)</span>
+                    <span class="k">else</span>
+                        <span class="k">for</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="o">#</span><span class="n">arg</span><span class="p">,</span> <span class="mi">2</span> <span class="k">do</span>
+                            <span class="n">DATABASE</span><span class="p">[</span><span class="n">arg</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">=</span> <span class="n">cjson</span><span class="p">.</span><span class="n">decode</span><span class="p">(</span><span class="n">arg</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
+                        <span class="k">end</span>
+                    <span class="k">end</span>
+                <span class="k">end</span><span class="p">,</span>
+            <span class="p">[</span><span class="s1">&#39;</span><span class="s">GET&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="k">function</span> <span class="p">(</span><span class="n">x</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="o">#</span><span class="n">arg</span> <span class="o">~=</span> <span class="mi">1</span> <span class="k">then</span>
+                        <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">invalid amount of arguments passed on to mockRedis.get&#39;</span><span class="p">)</span>
+                    <span class="k">else</span>
+                        <span class="k">if</span> <span class="n">DATABASE</span><span class="p">[</span><span class="n">arg</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span> <span class="k">then</span>
+                            <span class="k">return</span> <span class="n">cjson</span><span class="p">.</span><span class="n">encode</span><span class="p">(</span><span class="n">DATABASE</span><span class="p">[</span><span class="n">arg</span><span class="p">[</span><span class="mi">1</span><span class="p">]])</span>
+                        <span class="k">else</span>
+                            <span class="k">return</span> <span class="kc">nil</span>
+                        <span class="k">end</span>
+                    <span class="k">end</span>
+                <span class="k">end</span><span class="p">,</span>
+            <span class="n">default</span> <span class="o">=</span> <span class="k">function</span> <span class="p">(</span><span class="n">x</span><span class="p">)</span>
+                    <span class="nb">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="s">unsupported method &#39;</span> <span class="o">..</span> <span class="n">operation</span> <span class="o">..</span> <span class="s1">&#39;</span><span class="s"> called on mockRedis&#39;</span><span class="p">)</span>
+                <span class="k">end</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">mockRedis</span><span class="p">:</span><span class="n">case</span><span class="p">(</span><span class="n">operation</span><span class="p">)</span>
+    <span class="k">end</span><span class="p">,</span>
+
+    <span class="n">LOG_DEBUG</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="s">DEBUG&quot;</span><span class="p">,</span>
+    <span class="n">LOG_VERBOSE</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="s">VERBOSE&quot;</span><span class="p">,</span>
+    <span class="n">LOG_NOTICE</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="s">NOTICE&quot;</span><span class="p">,</span>
+    <span class="n">LOG_WARNING</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="s">LOG_WARNING&quot;</span><span class="p">,</span>
+
+    <span class="n">log</span> <span class="o">=</span> <span class="k">function</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+        <span class="c1">--print(level .. &quot;# &quot; .. message)</span>
+    <span class="k">end</span>
+<span class="p">}</span></code></pre></div>
+
+<p>It might be just slightly overwhelming if you are not that much into Lua, although — it’s pretty basic, once you get your head around it, it won’t be a biggy to extend it further, to suit your needs.</p>
+
+<h3 id="integration-test-spawning-redis-process-from-nodejs-to-execute-lua-in-it">Integration test: Spawning Redis process from Node.JS to execute Lua in it</h3>
+
+<p>Now, for the simplicity sake of this article I will drop the part about doing integration test through a real instance of Redis.</p>
+
+<p>In short we wrote a wrapper that launches Redis from Node.JS while you are running your Mocha tests in <code>before</code> and <code>after</code> blocks, something like this —</p>
+
+<div class="highlight"><pre><code class="language-coffeescript" data-lang="coffeescript"><span class="nv">RedisServer = </span><span class="p">(</span><span class="nx">require</span> <span class="s">&#39;./redis_spawn&#39;</span><span class="p">).</span><span class="nx">RedisServer</span>
+<span class="nv">redisServerOpts =</span>
+    <span class="nv">workingDirectory: </span><span class="nx">RedisServer</span><span class="o">::</span><span class="nx">optionsDefault</span><span class="p">.</span><span class="nx">workingDirectory</span>
+    <span class="nv">save: </span><span class="kc">true</span>
+    <span class="nv">timeout: </span><span class="mi">2000</span>
+<span class="nv">redisServer = </span><span class="k">new</span> <span class="nx">redisSpawn</span><span class="p">.</span><span class="nx">RedisServer</span> <span class="nx">redisServerOpts</span>
+
+<span class="p">...</span>
+
+    <span class="nx">before</span> <span class="nf">(done) -&gt;</span>
+        <span class="nx">redisServer</span><span class="p">.</span><span class="nx">start</span> <span class="nf">() -&gt;</span>
+            <span class="nv">redisClient = </span><span class="nx">redis</span><span class="p">.</span><span class="nx">createClient</span> <span class="nx">redisServerOpts</span><span class="p">.</span><span class="nx">config</span><span class="p">.</span><span class="nx">port</span>
+            <span class="nx">redisClient</span><span class="p">.</span><span class="nx">once</span> <span class="s">&#39;connect&#39;</span><span class="p">,</span> <span class="nf">() -&gt;</span>
+                <span class="nx">redisClient</span><span class="p">.</span><span class="nx">flushall</span> <span class="nx">done</span></code></pre></div>
+
+<p>And then interacts with the Lua script that is running on the recently spawned Redis instance. Might there be any interest in it — we’ll put up a separate article on the topic. Don’t hesitate to reach out to us!</p>
+
+<h2 id="in-production">In Production</h2>
+
+<h3 id="installing-lua-script-upon-application-start">Installing Lua script upon application start</h3>
+
+<p>Now that you have your Lua scripts thoroughly tested it is time to run them in production. The basic idea is to load them once on application startup and keep the resulting <code>SHA</code>, so that you won’t have to send the script there and back each and every time upon request.</p>
+
+<p>Instead of thousand of words, the CoffeeScript snippet that will do just that —</p>
+
+<div class="highlight"><pre><code class="language-coffeescript" data-lang="coffeescript"><span class="nv">redis = </span><span class="nx">require</span> <span class="s">&#39;redis&#39;</span>
+
+<span class="nv">module.exports.YourDbClient =</span>
+<span class="k">class</span> <span class="nx">RdbClient</span> <span class="k">extends</span> <span class="nx">EventEmitter</span>
+    <span class="nv">constructor: </span><span class="nf">() -&gt;</span>
+        <span class="vi">@scripts = </span><span class="p">{</span>
+            <span class="nv">someScript1:</span>
+                <span class="nv">text: </span><span class="p">(</span><span class="nx">fs</span><span class="p">.</span><span class="nx">readFileSync</span> <span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nx">join</span> <span class="nx">__dirname</span><span class="p">,</span> <span class="s">&#39;someScript1.lua&#39;</span><span class="p">)).</span><span class="nx">toString</span><span class="p">()</span>
+            <span class="nv">someScript2:</span>
+                <span class="nv">text: </span><span class="p">(</span><span class="nx">fs</span><span class="p">.</span><span class="nx">readFileSync</span> <span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nx">join</span> <span class="nx">__dirname</span><span class="p">,</span> <span class="s">&#39;someScript2.lua&#39;</span><span class="p">)).</span><span class="nx">toString</span><span class="p">()</span>
+                <span class="nv">sha1: </span><span class="kc">null</span>
+        <span class="p">}</span>
+        <span class="nv">script.name = </span><span class="nx">name</span> <span class="k">for</span> <span class="nx">name</span><span class="p">,</span> <span class="nx">script</span> <span class="k">of</span> <span class="nx">@scripts</span>      <span class="c1"># copy name -&gt; .name</span>
+        <span class="nx">@connect</span><span class="p">()</span>
+
+    <span class="nv">connect: </span><span class="nf">(cb) -&gt;</span>
+        <span class="k">if</span> <span class="nx">@rdb</span> <span class="k">then</span> <span class="k">return</span> <span class="nx">cb</span><span class="o">?</span><span class="p">()</span>
+
+        <span class="vi">@rdb = </span><span class="nx">redis</span><span class="p">.</span><span class="nx">createClient</span> <span class="o">&lt;</span><span class="nx">redisPort</span><span class="o">&gt;</span><span class="p">,</span> <span class="o">&lt;</span><span class="nx">redisHost</span><span class="o">&gt;</span><span class="p">,</span> <span class="o">&lt;</span><span class="nx">redisOpts</span><span class="o">&gt;</span>
+
+        <span class="nv">loadScripts = </span><span class="nf">(cb) =&gt;</span>
+            <span class="nv">loader = </span><span class="nx">@rdb</span><span class="p">.</span><span class="nx">multi</span><span class="p">()</span>
+            <span class="nx">loader</span><span class="p">.</span><span class="nx">script</span> <span class="s">&#39;load&#39;</span><span class="p">,</span> <span class="nx">@scripts</span><span class="p">.</span><span class="nx">someScript1</span><span class="p">.</span><span class="nx">text</span>
+            <span class="nx">loader</span><span class="p">.</span><span class="nx">script</span> <span class="s">&#39;load&#39;</span><span class="p">,</span> <span class="nx">@scripts</span><span class="p">.</span><span class="nx">someScript2</span><span class="p">.</span><span class="nx">text</span>
+            <span class="nx">loader</span><span class="p">.</span><span class="nb">eval</span> <span class="nx">@scripts</span><span class="p">.</span><span class="nx">configure</span><span class="p">.</span><span class="nx">text</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span> <span class="p">{</span> <span class="nv">clients: </span><span class="nx">@config</span><span class="p">.</span><span class="nx">bidder</span><span class="p">.</span><span class="nx">clients</span> <span class="p">}),</span> <span class="nb">Date</span><span class="p">.</span><span class="nx">now</span><span class="p">()</span>
+            <span class="nx">loader</span><span class="p">.</span><span class="nx">script</span> <span class="s">&#39;load&#39;</span><span class="p">,</span> <span class="nx">@scripts</span><span class="p">.</span><span class="nx">spend</span><span class="p">.</span><span class="nx">text</span>
+            <span class="nx">loader</span><span class="p">.</span><span class="nx">exec</span> <span class="nf">(err, results) =&gt;</span>
+                <span class="k">if</span> <span class="nx">err</span>
+                    <span class="nx">cb</span><span class="o">?</span> <span class="nx">err</span>
+                    <span class="k">throw</span> <span class="nx">err</span>
+                <span class="vi">@scripts.someScript1.sha1 = </span><span class="nx">results</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="vi">@scripts.someScript2.sha1 = </span><span class="nx">results</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="nx">cb</span><span class="o">?</span><span class="p">()</span>
+
+        <span class="nx">@rdb</span><span class="p">.</span><span class="nx">on</span> <span class="s">&#39;connect&#39;</span><span class="p">,</span> <span class="nf">() =&gt;</span>
+            <span class="nx">loadScripts</span> <span class="nf">() =&gt;</span> <span class="nx">@emit</span> <span class="s">&#39;connected&#39;</span>
+        <span class="nx">@rdb</span><span class="p">.</span><span class="nx">on</span> <span class="s">&#39;reconnect&#39;</span><span class="p">,</span> <span class="nf">() =&gt;</span>
+            <span class="nx">loadScripts</span> <span class="nf">() =&gt;</span> <span class="nx">@emit</span> <span class="s">&#39;reconnected&#39;</span>
+        <span class="nx">@rdb</span><span class="p">.</span><span class="nx">once</span> <span class="s">&#39;end&#39;</span><span class="p">,</span> <span class="nf">() =&gt;</span>
+            <span class="vi">@rdb = </span><span class="kc">null</span>
+
+    <span class="nv">actionWithRedis: </span><span class="nf">(args...) -&gt;</span>
+        <span class="nx">@txn</span> <span class="o">?=</span> <span class="nx">@rdb</span><span class="p">.</span><span class="nx">multi</span><span class="p">()</span>
+        <span class="vi">@operation = </span><span class="p">[</span><span class="nx">@client</span><span class="p">.</span><span class="nx">scripts</span><span class="p">.</span><span class="nx">spend</span><span class="p">.</span><span class="nx">sha1</span><span class="p">]</span>
+        <span class="nx">@txn</span><span class="p">.</span><span class="nx">evalsha</span><span class="p">.</span><span class="nx">apply</span> <span class="nx">@txn</span><span class="p">,</span> <span class="p">(</span><span class="nx">@operation</span><span class="p">.</span><span class="nx">concat</span> <span class="nx">args</span><span class="p">)</span>
+        <span class="nx">@txn</span><span class="p">.</span><span class="nx">exec</span> <span class="nf">(err, results) =&gt;</span>
+            <span class="c1"># further sweetness</span>
+            <span class="p">...</span></code></pre></div>
+
+<h3 id="puppet-configuration-for-jenkins">Puppet configuration for Jenkins</h3>
+
+<p>We utilize Jenkins with JUnit test result reports, Busted works with it just fine with XUnit reporting engine —</p>
+
+<div class="highlight"><pre><code class="language-bash" data-lang="bash"><span class="nv">$ </span>busted -o junit ./test</code></pre></div>
+
+<p>And here are the small bits of puppet configuration to enable your Jenkins with Lua, Busted and the necessary libs:</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="k">class</span> <span class="n">genericpackages</span><span class="o">::</span><span class="n">lua</span> <span class="p">{</span>
+    <span class="n">package</span> <span class="p">{</span> <span class="s2">&quot;luarocks&quot;</span><span class="p">:</span>
+        <span class="k">ensure</span> <span class="o">=&gt;</span> <span class="n">installed</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nb">exec</span><span class="p">{</span> <span class="s2">&quot;install busted&quot;</span><span class="p">:</span>
+        <span class="n">command</span> <span class="o">=&gt;</span> <span class="s2">&quot;luarocks install busted&quot;</span><span class="p">,</span>
+        <span class="nb">require</span> <span class="o">=&gt;</span> <span class="no">Package</span><span class="o">[</span><span class="s1">&#39;luarocks&#39;</span><span class="o">]</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nb">exec</span><span class="p">{</span> <span class="s2">&quot;install cjson redis library&quot;</span><span class="p">:</span>
+        <span class="n">command</span> <span class="o">=&gt;</span> <span class="s2">&quot;luarocks install lua-cjson&quot;</span><span class="p">,</span>
+        <span class="nb">require</span> <span class="o">=&gt;</span> <span class="no">Package</span><span class="o">[</span><span class="s1">&#39;luarocks&#39;</span><span class="o">]</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">}</span></code></pre></div>
+
+<h2 id="summary">Summary</h2>
+
+<p>Four months into the game — works as a charm, easy to monitor. We are very happy with transition of our accounting logic into Lua scripts executed directly in the Redis.</p>
+
+<h2 id="links">Links</h2>
+
+<ol>
+  <li><a href="http://www.lua.org/">Lua Main Page</a></li>
+  <li><a href="http://github.com/keplerproject/luarocks">LuaRocks</a></li>
+  <li><a href="http://luarocks.org/en/Installation_instructions_for_Mac_OS_X">Installing Lua Rocks on Mac</a></li>
+  <li><a href="http://www.redisgreen.net/blog/intro-to-lua-for-redis-programmers/">Intro to Lua for Redis programmers</a></li>
+</ol>
+
+<p><em>[Originally published in <a href="http://screen6.github.io/blog/2014/09/18/lua-scripts-in-redis-within-nodejs.html">Screen6 Technical Blog</a> on 09/18/2014]</em></p>
+
+</div>
+
+
+<div id="author">
+  by <a href="http://ilyapimenov.com/">Ilya Pimenov</a>
+</div>
+
+
+
+    <div id="disqus_thread"></div>
+    <script type="text/javascript">
+        /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+        var disqus_shortname = 'ilya-pi'; // required: replace example with your forum shortname
+
+        /* * * DON'T EDIT BELOW THIS LINE * * */
+        (function() {
+            var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+            dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+            (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+        })();
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>    
+
+
+<hr>
+
+<div id="related">
+  <h3>Related Posts</h3>
+  <ul class="posts">
+    
+    
+    <li>
+      <span>19 Jan 2015 &raquo;</span> <a href="/blog/2015/01/19/ftp-proxy-to-gcs.html">FTP Proxy to Google Cloud Storage</a>
+    </li>
+    
+    
+    
+    <li>
+      <span>12 Nov 2014 &raquo;</span> <a href="/blog/2014/11/12/unzip-files-on-s3-concatenate-gzip-and-put-on-gs.html">Unzip files on S3, concatenate, gzip and put on Google Cloud Storage</a>
+    </li>
+    
+    
+    
+    <li>
+      <span>14 Nov 2013 &raquo;</span> <a href="/blog/2013/11/14/hyperloglog-with-cascalog.html">HyperLogLog with Cascalog</a>
+    </li>
+    
+    
+  </ul>
+</div>
+    
+      <div class="footer">
+        <div class="disclaimer">
+  <p>
+    
+        The postings on this site are my own and don't necessarily represent my employer’s positions, strategies or opinions.<br/>
+    
+
+    © Ilya Pimenov, 2013-2015 &mdash; built with Jekyll using Lagom theme
+  </p>
+</div>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-64421368-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+</body>
+</html>
