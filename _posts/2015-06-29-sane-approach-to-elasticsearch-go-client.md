@@ -201,7 +201,7 @@ main.go:
 package main
 
 import (
-    "caselastic"
+    "saneelastic"
     "fmt"
 )
 
@@ -214,7 +214,7 @@ func main() {
     // es := elastic.New("http://localhost:9200")
 
     //.3
-    es := caselastic.New("http://localhost:9200")
+    es := saneelastic.New("http://localhost:9200")
 
     // .0
     // res, err := es.Get("_search", `
@@ -520,10 +520,10 @@ func (r Result) MustGetHits() []Hits {
 
 
 ----
-caselastic.go
+saneelastic.go
 -------------
 
-package caselastic
+package saneelastic
 
 import (
     "elastic"
